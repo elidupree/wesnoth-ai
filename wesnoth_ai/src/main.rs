@@ -5,7 +5,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate rand;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{Rng, random};
 
@@ -125,18 +125,141 @@ fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)-
   output [0]
 }
 
+
+#[derive (Clone, Serialize, Deserialize)]
+struct Attack {
+  damage: i32,
+  number: i32,
+  damage_type: String,
+  range: String,
+  // TODO: specials
+}
+#[derive (Clone, Serialize, Deserialize)]
+struct Side {
+  gold: i32,
+  enemies: HashSet <usize>,
+}
+
+
+#[derive (Clone, Serialize, Deserialize)]
+struct Unit {
+  x: i32,
+  y: i32,
+  side: usize,
+  alignment: i32,
+  attacks_left: i32,
+  canrecruit: bool,
+  experience: i32,
+  hitpoints: i32,
+  level: i32,
+  max_experience: i32,
+  max_hitpoints: i32,
+  max_moves: i32,
+  moves: i32,
+  resting: bool,
+  slowed: bool,
+  poisoned: bool,
+  zone_of_control: bool,
+  defense: HashMap<String, i32>,
+  movement_costs: HashMap <String, i32>,
+  resistance: HashMap <String, i32>,
+  attacks: Vec<Attack>,
+  // TODO: abilities
+}
+
+#[derive (Clone, Serialize, Deserialize)]
+struct Location {
+  terrain: String,
+  village_owner: usize,
+  unit: Option <Unit>,
+}
+#[derive (Clone, Serialize, Deserialize)]
+struct TerrainInfo{
+  keep: bool,
+  castle: bool,
+  village: bool,
+}
+
+#[derive (Clone, Serialize, Deserialize)]
+struct WesnothConfig {
+  unit_type_examples: HashMap <String, Unit>,
+  terrain_info: HashMap <String, TerrainInfo>,
+}
+
 #[derive (Clone, Serialize, Deserialize)]
 struct WesnothState {
+  config: Arc <WesnothConfig>,
   current_side: usize,
-  
+  width: i32,
+  height: i32,
+  locations: Vec<Location>,
+  sides: Vec<Side>,
+}
+impl WesnothState {
+  fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.width) as usize]}
+  fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [(x+y*self.width) as usize]}
+  fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
 #[derive (Clone, Serialize, Deserialize)]
-enum WesnothInput {
-
+enum WesnothMove {
+  Move {
+    src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
+  },
+  Attack {
+    src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
+  },
+  Recruit {
+    dst_x: i32, dst_y: i32, unit_type: String,
+  },
+  EndTurn,
 }
 
-fn apply_wesnoth_input (state: &mut WesnothState, input: & WesnothInput)->Vec<NeuralInput> {
+fn represent_bool (value: bool)->f32 {if value {1.0} else {0.0}}
+
+fn represent_unit (state: & WesnothState, unit: & Unit)->Vec<f32> {
+  vec![
+    unit.x as f32, unit.y as f32,
+    unit.moves as f32, unit.attacks_left as f32,
+    unit.hitpoints as f32, (unit.max_experience - unit.experience) as f32,
+    represent_bool (!state.is_enemy (state.current_side, unit.side)), represent_bool (unit.canrecruit),
+    unit.max_hitpoints as f32, unit.max_moves as f32,
+    represent_bool (unit.slowed), represent_bool (unit.poisoned),
+    unit.alignment as f32,
+    represent_bool (unit.zone_of_control),
+    unit.resistance.get ("blade").unwrap().clone() as f32,
+    unit.resistance.get ("pierce").unwrap().clone() as f32,
+    unit.resistance.get ("impact").unwrap().clone() as f32,
+    unit.resistance.get ("fire").unwrap().clone() as f32,
+    unit.resistance.get ("cold").unwrap().clone() as f32,
+    unit.resistance.get ("arcane").unwrap().clone() as f32,
+
+    
+  ]
+}
+
+fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralInput {
+  match input {
+    &WesnothMove::Move {src_x, src_y, dst_x, dst_y} => NeuralInput {
+      input_type: "move".to_string(),
+      vector: [dst_x as f32, dst_y as f32].into_iter().cloned().chain(represent_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap())).collect()
+    },
+    & WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => unimplemented!(),
+    &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
+      let mut example = state.config.unit_type_examples.get (unit_type).unwrap().clone();
+      example.side = state.current_side;
+      example.x = dst_x;
+      example.y = dst_y;
+      
+      NeuralInput {
+        input_type: "move".to_string(),
+        vector: represent_unit (state, & example),
+      }
+    },
+    & WesnothMove::EndTurn => unreachable!(),
+  }
+}
+fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<NeuralInput> {
   unimplemented!()
 }
 
@@ -144,7 +267,7 @@ struct Replay {
   initial_state: Arc <WesnothState>,
   final_state: Arc <WesnothState>,
   neural_moves: Vec<NeuralInput>,
-  wesnoth_inputs: Vec<WesnothInput>,
+  wesnoth_moves: Vec<WesnothMove>,
   neural_inputs: Vec<NeuralInput>,
   branches: Vec<Replay>,
   scores_by_side: Vec<f32>,
