@@ -149,6 +149,7 @@ struct Unit {
   alignment: i32,
   attacks_left: i32,
   canrecruit: bool,
+  cost: i32,
   experience: i32,
   hitpoints: i32,
   level: i32,
@@ -159,6 +160,7 @@ struct Unit {
   resting: bool,
   slowed: bool,
   poisoned: bool,
+  not_living: bool,
   zone_of_control: bool,
   defense: HashMap<String, i32>,
   movement_costs: HashMap <String, i32>,
@@ -171,33 +173,48 @@ struct Unit {
 struct Location {
   terrain: String,
   village_owner: usize,
-  unit: Option <Unit>,
+  unit: Option <Box <Unit>>,
 }
 #[derive (Clone, Serialize, Deserialize)]
 struct TerrainInfo{
   keep: bool,
   castle: bool,
   village: bool,
+  healing: i32,
+}
+
+#[derive (Clone, Serialize, Deserialize)]
+struct Faction {
+  recruits: Vec<Unit>,
+  leaders: Vec<Unit>,
 }
 
 #[derive (Clone, Serialize, Deserialize)]
 struct WesnothConfig {
   unit_type_examples: HashMap <String, Unit>,
   terrain_info: HashMap <String, TerrainInfo>,
+  factions: Vec<Faction>,
+}
+
+#[derive (Clone, Serialize, Deserialize)]
+struct WesnothMap {
+  config: Arc <WesnothConfig>,
+  width: i32,
+  height: i32,
+  locations: Vec<Location>,
+  starting_locations: Vec<[i32; 2]>,
 }
 
 #[derive (Clone, Serialize, Deserialize)]
 struct WesnothState {
-  config: Arc <WesnothConfig>,
+  map: Arc <WesnothMap>,
   current_side: usize,
-  width: i32,
-  height: i32,
   locations: Vec<Location>,
   sides: Vec<Side>,
 }
 impl WesnothState {
-  fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.width) as usize]}
-  fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [(x+y*self.width) as usize]}
+  fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.map.width) as usize]}
+  fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [(x+y*self.map.width) as usize]}
   fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
@@ -224,7 +241,7 @@ fn represent_unit (state: & WesnothState, unit: & Unit)->Vec<f32> {
     unit.hitpoints as f32, (unit.max_experience - unit.experience) as f32,
     represent_bool (!state.is_enemy (state.current_side, unit.side)), represent_bool (unit.canrecruit),
     unit.max_hitpoints as f32, unit.max_moves as f32,
-    represent_bool (unit.slowed), represent_bool (unit.poisoned),
+    represent_bool (unit.slowed), represent_bool (unit.poisoned), represent_bool (unit.not_living),
     unit.alignment as f32,
     represent_bool (unit.zone_of_control),
     unit.resistance.get ("blade").unwrap().clone() as f32,
@@ -246,7 +263,7 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
     },
     & WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => unimplemented!(),
     &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
-      let mut example = state.config.unit_type_examples.get (unit_type).unwrap().clone();
+      let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
       example.side = state.current_side;
       example.x = dst_x;
       example.y = dst_y;
