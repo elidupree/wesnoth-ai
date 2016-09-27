@@ -1,4 +1,4 @@
-#![feature (plugin, custom_derive)]
+#![feature (plugin, custom_derive, slice_patterns)]
 #![plugin (serde_macros)]
 
 extern crate serde;
@@ -235,7 +235,7 @@ impl WesnothState {
 #[derive (Clone, Serialize, Deserialize)]
 enum WesnothMove {
   Move {
-    src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
+    src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, moves_left: i32,
   },
   Attack {
     src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
@@ -285,11 +285,22 @@ fn represent_unit (state: & WesnothState, unit: & Unit)->Vec<f32> {
 
 fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralInput {
   match input {
-    &WesnothMove::Move {src_x, src_y, dst_x, dst_y} => NeuralInput {
+    &WesnothMove::Move {src_x, src_y, dst_x, dst_y, ..} => NeuralInput {
       input_type: "move".to_string(),
       vector: represent_location (state, dst_x, dst_y).into_iter().chain(represent_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap())).collect()
     },
-    & WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => unimplemented!(),
+    &WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+      NeuralInput {
+        input_type: "attack".to_string(),
+        vector: represent_location (state, dst_x, dst_y).into_iter()
+          .chain(represent_location (state, attack_x, attack_y))
+          .chain(represent_unit (state, &state.get (dst_x, dst_y).unit.as_ref().unwrap()))
+          .chain(represent_unit (state, &state.get (attack_x, attack_y).unit.as_ref().unwrap()))
+          .chain (vec![0.2, 0.2, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0])
+          .collect()
+      }
+
+    }
     &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
       let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
       example.side = state.current_side;
@@ -301,10 +312,91 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
         vector: represent_unit (state, & example),
       }
     },
-    & WesnothMove::EndTurn => unreachable!(),
+    &WesnothMove::EndTurn => unreachable!(),
   }
 }
+
 fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<NeuralInput> {
+  let mut results = Vec::new();
+  match input {
+    &WesnothMove::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
+      let mut unit = state.get_mut (src_x, src_y).unit.take().unwrap();
+      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: represent_unit (state, &unit)});
+      unit.x = dst_x;
+      unit.y = dst_y;
+      unit.moves = moves_left;
+      unit.resting = false;
+      results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, &unit)});
+      state.get_mut (dst_x, dst_y).unit = Some (unit);
+    },
+    &WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+      if src_x != dst_x || src_y != dst_y {
+        results.extend (apply_wesnoth_move (state, &WesnothMove::Move {
+          src_x: src_x, src_y: src_y, dst_x: dst_x, dst_y: dst_y, moves_left: 0
+        }));
+      }
+      let mut attacker = state.get_mut (dst_x, dst_y).unit.take().unwrap();
+      let mut defender = state.get_mut (attack_x, attack_y).unit.take().unwrap();
+      attacker.moves = 0;
+      attacker.attacks_left -= 1;
+      let (new_attacker, new_defender) = combat_results (state, &attacker, &defender);
+      
+      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: represent_unit (state, & attacker)});
+      if let Some (unit) = new_attacker.as_ref() {
+        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, unit)});
+      }
+      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: represent_unit (state, & defender)});
+      if let Some (unit) = new_defender.as_ref() {
+        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, unit)});
+      }
+      
+      state.get_mut (dst_x, dst_y).unit = new_attacker;
+      state.get_mut (attack_x, attack_y).unit = new_defender;
+    }
+    &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
+      let mut unit = Box::new (state.map.config.unit_type_examples.get (unit_type).unwrap().clone());
+      unit.side = state.current_side;
+      unit.x = dst_x;
+      unit.y = dst_y;
+      results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, &unit)});
+      state.get_mut (dst_x, dst_y).unit = Some (unit);
+    },
+    & WesnothMove::EndTurn => {
+      state.current_side += 1;
+      if state.current_side >= state.sides.len() {
+        state.turns_left -= 1;
+        state.current_side = 0;
+      }
+      let mut added_units = Vec::new();
+      for (index, location) in state.locations.iter_mut().enumerate() {
+        if let Some (unit) = location.unit.as_mut() {
+          if unit.side == state.current_side {
+            let terrain_healing = state.map.config.terrain_info.get (&location.terrain).unwrap().healing;
+            let healing = if unit.poisoned && terrain_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
+            unit.resting = true;
+            unit.moves = unit.max_moves;
+            if healing > 0 && unit.hitpoints < unit.max_hitpoints {
+              unit.hitpoints = ::std::cmp::min (unit.max_hitpoints, unit.hitpoints + healing);
+            }
+            if healing < 0 && unit.hitpoints > 1{
+              unit.hitpoints = ::std::cmp::max (1, unit.hitpoints + healing);
+            }
+            
+          }
+          added_units.push (index);
+          
+        }
+      }
+      for index in added_units {
+        let unit = state.locations[index].unit.as_ref().unwrap();
+        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, unit)});
+      }
+    },
+  }
+  results
+}
+
+fn combat_results (state: & WesnothState, attacker: & Unit, defender: & Unit)->(Option <Box <Unit>>, Option <Box <Unit>>) {
   unimplemented!()
 }
 
@@ -347,8 +439,15 @@ fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f32 {
   (unadjusted - worst_possible)/(best_possible - worst_possible)
 }
 
-fn adjacent_locations (coordinates: [i32; 2])->Vec<[i32; 2]> {
-  unimplemented!()
+fn adjacent_locations (map: & WesnothMap, coordinates: [i32; 2])->Vec<[i32; 2]> {
+  vec![
+    [coordinates [0], coordinates [1] + 1],
+    [coordinates [0], coordinates [1] - 1],
+    [coordinates [0]-1, coordinates [1] + (coordinates [0]&1)],
+    [coordinates [0]-1, coordinates [1] - 1 + (coordinates [0]&1)],
+    [coordinates [0]+1, coordinates [1] + (coordinates [0]&1)],
+    [coordinates [0]+1, coordinates [1] - 1 + (coordinates [0]&1)],
+  ].into_iter().filter (|&[x,y]| x >= 0 && y >= 0 && x < map.width && y < map.height).collect()
 }
 
 fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
@@ -357,11 +456,11 @@ fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
   frontiers [unit.moves as usize].insert ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], HashSet::new()) {
-      for adjacent in adjacent_locations (location) {
+      for adjacent in adjacent_locations (& state.map, location) {
         let mut remaining = moves_left - unit.movement_costs.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap();
         if remaining >= 0 {
           if remaining >0 {
-           for double_adjacent in adjacent_locations (adjacent) {
+           for double_adjacent in adjacent_locations (& state.map, adjacent) {
               if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
                 break;
@@ -384,7 +483,7 @@ fn recruit_hexes (state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
     frontier.push ([unit.x, unit.y]);
   }
   while let Some (location) = frontier.pop() {
-    for adjacent in adjacent_locations (location) {
+    for adjacent in adjacent_locations (& state.map, location) {
       if state.map.config.terrain_info.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap().castle && !discovered.contains (& adjacent) {
         frontier.push (adjacent);
       }
@@ -404,11 +503,12 @@ fn possible_unit_moves(state: & WesnothState, unit: & Unit)->Vec<WesnothMove> {
     if unit_there.is_none() {
       results.push (WesnothMove::Move {
         src_x: unit.x, src_y: unit.y,
-        dst_x: location.0 [0], dst_y: location.0 [1]
+        dst_x: location.0 [0], dst_y: location.0 [1],
+        moves_left: location.1
       });
     }
     if unit.attacks_left > 0 && unit_there.map_or (true, | other | unit.x == other.x && unit.y == other.y) {
-      for adjacent in adjacent_locations (location.0) {
+      for adjacent in adjacent_locations (& state.map, location.0) {
         if let Some (neighbor) = state.get (adjacent [0], adjacent [1]).unit.as_ref() {
           if state.is_enemy (unit.side, neighbor.side) {
             for index in 0..unit.attacks.len() {
