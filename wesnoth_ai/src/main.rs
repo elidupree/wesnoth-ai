@@ -185,8 +185,8 @@ struct TerrainInfo{
 
 #[derive (Clone, Serialize, Deserialize)]
 struct Faction {
-  recruits: Vec<Unit>,
-  leaders: Vec<Unit>,
+  recruits: Vec<String>,
+  leaders: Vec<String>,
 }
 
 #[derive (Clone, Serialize, Deserialize)]
@@ -319,7 +319,12 @@ fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f32 {
   (unadjusted - worst_possible)/(best_possible - worst_possible)
 }
 
-
+use std::fs::File;
+use std::io::Read;
 fn main() {
+  let mut f = File::open("tiny_close_relation_default.json").unwrap();
+  let mut s = String::new();
+  f.read_to_string(&mut s).unwrap();
+  let tiny_close_relation_data: Arc<WesnothMap> = serde_json::from_str(&s).unwrap();
   println!("{}", serde_json::to_string (&random_organism(vec![5,5])).unwrap());
 }
