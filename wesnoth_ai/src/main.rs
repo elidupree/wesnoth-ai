@@ -23,15 +23,17 @@ struct Organism {
 struct LayerWeights {
   hidden_matrix: Matrix,
   input_matrix: Matrix,
+  bias: Vec<f32>,
 }
 #[derive (Clone, Serialize, Deserialize)]
 struct Matrix {
   input_size: usize,
   output_size: usize,
   weights: Vec<f32>,
+
 }
 
-const UNIT_SIZE: usize = 12;
+
 
 thread_local! {
   static INPUTS: HashMap <String, usize> = {
@@ -62,14 +64,13 @@ fn random_organism (layer_sizes: Vec<usize>)->Organism {
     output_weights: random_matrix (last_layer_size, 1),
   };
   INPUTS.with (| inputs| for (name, size) in inputs {
-    let mut vect = vec![LayerWeights{
-      input_matrix: random_matrix (size.clone(), layer_sizes[0]),
-      hidden_matrix: random_matrix (layer_sizes[0], layer_sizes[0]),}];
-    for index in 1.. layer_sizes.len() {
-      vect.push (LayerWeights{
-        input_matrix: random_matrix (layer_sizes[index - 1], layer_sizes[index]),
-        hidden_matrix: random_matrix (layer_sizes[index], layer_sizes[index]),});
-    }
+    let vect = layer_sizes.iter().enumerate().map (| (index, layer_size) | {
+      LayerWeights{
+        input_matrix: random_matrix (if index == 0 {size.clone()} else {layer_sizes[index - 1]}, layer_size.clone()),
+        hidden_matrix: random_matrix (layer_size.clone(), layer_size.clone()),
+        bias: rand::thread_rng().gen_iter().take (layer_size.clone()).collect(),
+      }
+    }).collect();
     result.weights_by_input.insert (name.clone(), vect);
   });
   result
@@ -99,8 +100,8 @@ fn multiply_into (input: &[f32], output: &mut [f32], matrix: & Matrix) {
 fn next_memory (organism: & Organism, memory: & Memory, input: &NeuralInput)->Memory {
   let mut result = Memory {layers: Vec::new()};
   for layer in 0..organism.layer_sizes.len() {
-    let mut next_layer = vec![0.0; organism.layer_sizes [layer]];
     let layer_weights = &organism.weights_by_input.get (& input.input_type).unwrap()[layer];
+    let mut next_layer = layer_weights.bias.clone();
     multiply_into (&memory.layers [layer], &mut next_layer, & layer_weights.hidden_matrix);
     multiply_into (if layer == 0 {&input.vector} else {& memory.layers [layer - 1]}, &mut next_layer, & layer_weights.input_matrix);
     for item in next_layer.iter_mut() {*item = item.tanh();}
@@ -138,6 +139,8 @@ struct Attack {
 struct Side {
   gold: i32,
   enemies: HashSet <usize>,
+  player: Arc <Organism>,
+  memory: Memory,
 }
 
 
@@ -211,6 +214,8 @@ struct WesnothState {
   current_side: usize,
   locations: Vec<Location>,
   sides: Vec<Side>,
+  time_of_day: i32,
+  turns_left: i32,
 }
 impl WesnothState {
   fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.map.width) as usize]}
@@ -234,7 +239,20 @@ enum WesnothMove {
 
 fn represent_bool (value: bool)->f32 {if value {1.0} else {0.0}}
 
+const LOCATION_SIZE: usize = 6;
+fn represent_location (state: & WesnothState,x: i32,y: i32)->Vec<f32> {
+  let terrain = & state.get (x, y).terrain;
+  let info = state.map.config.terrain_info.get (terrain).unwrap();
+  vec![
+    x as f32, y as f32,
+    represent_bool (info. keep), represent_bool (info.castle), represent_bool (info.village),
+    info.healing as f32,
+  ]
+}
+
+const UNIT_SIZE: usize = 23;
 fn represent_unit (state: & WesnothState, unit: & Unit)->Vec<f32> {
+  let terrain = & state.get (unit.x, unit.y).terrain;
   vec![
     unit.x as f32, unit.y as f32,
     unit.moves as f32, unit.attacks_left as f32,
@@ -250,7 +268,8 @@ fn represent_unit (state: & WesnothState, unit: & Unit)->Vec<f32> {
     unit.resistance.get ("fire").unwrap().clone() as f32,
     unit.resistance.get ("cold").unwrap().clone() as f32,
     unit.resistance.get ("arcane").unwrap().clone() as f32,
-
+    unit.defense.get (terrain).unwrap().clone() as f32,
+    unit.movement_costs.get (terrain).unwrap().clone() as f32,
     
   ]
 }
@@ -259,7 +278,7 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
   match input {
     &WesnothMove::Move {src_x, src_y, dst_x, dst_y} => NeuralInput {
       input_type: "move".to_string(),
-      vector: [dst_x as f32, dst_y as f32].into_iter().cloned().chain(represent_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap())).collect()
+      vector: represent_location (state, dst_x, dst_y).into_iter().chain(represent_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap())).collect()
     },
     & WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => unimplemented!(),
     &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
@@ -317,6 +336,94 @@ fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f32 {
   }
   
   (unadjusted - worst_possible)/(best_possible - worst_possible)
+}
+
+fn adjacent_locations (coordinates: [i32; 2])->Vec<[i32; 2]> {
+  unimplemented!()
+}
+
+fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
+  let frontiers = vec![HashSet::new(); (unit.moves + 1) as usize];
+  let results = Vec::new();
+  frontiers [unit.moves as usize].insert ([unit.x, unit.y]);
+  for moves_left in (0..(unit.moves + 1)).rev() {
+    for location in ::std::mem::replace (&mut frontiers [moves_left as usize], HashSet::new()) {
+      for adjacent in adjacent_locations (location) {
+        let mut remaining = moves_left - unit.movement_costs.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap();
+        if remaining >= 0 {
+          if remaining >0 {
+           for double_adjacent in adjacent_locations (adjacent) {
+              if state.get (double_adjacent [0], double_adjacent [1]).unit.map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
+                remaining = 0;
+                break;
+              }
+            }
+          }
+          frontiers [remaining as usize].insert (adjacent);
+        }
+      }
+      if state.get (location [0], location [1]).unit.is_none() {
+        results.push ((location, moves_left));
+      }
+    }
+  }
+  results
+}
+
+fn recruit_hexes (state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
+  let discovered = HashSet::new();
+  let frontier = Vec::new();
+  if state.map.config.terrain_info.get (&state.get (unit.x, unit.y).terrain).unwrap().keep {
+    frontier.push ([unit.x, unit.y]);
+  }
+  while let Some (location) = frontier.pop() {
+    for adjacent in adjacent_locations (location) {
+      if state.map.config.terrain_info.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap().castle && !discovered.contains (& adjacent) {
+        frontier.push (adjacent);
+      }
+      discovered.insert (location);
+    }
+  }
+  discovered.into_iter().filter (| location | state.get (location [0], location [1]). unit.is_none()).collect()
+}
+
+fn possible_unit_moves(state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
+  if unit.side != state.current_side {return Vec::new();}
+  
+  let results = vec![];
+
+  for location in find_reach (state, unit) {
+    
+      results.extend (possible_unit_moves (state, unit));
+    
+  }
+  
+  results
+}
+
+fn possible_moves (state: & WesnothState)->Vec<WesnothMove> {
+  let results = vec![WesnothMove::EndTurn];
+  
+  for location in state.locations.iter() {
+    if let Some (unit) = location.unit.as_ref() {
+      results.extend (possible_unit_moves (state, unit));
+    }
+  }
+  
+  results
+}
+
+fn play_move (state: &mut WesnothState, replay: &mut Replay) {
+  let playing_side = &state.sides [state.current_side];
+  let moves: Vec<_> = possible_moves (state).into_iter().map (| action | {
+    let evaluation = evaluate_move (&playing_side.player, &playing_side.memory, &represent_wesnoth_move (state, &action));
+    (action, evaluation)
+  }).collect();
+  moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
+}
+
+fn play_game (player: & Organism, map: & WesnothMap)->Replay {
+  
 }
 
 use std::fs::File;
