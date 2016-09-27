@@ -38,7 +38,13 @@ struct Matrix {
 thread_local! {
   static INPUTS: HashMap <String, usize> = {
     let mut result = HashMap::new();
-    result.insert ("add_unit".to_string(), UNIT_SIZE);
+    result.insert ("turn_started".to_string(), 4);
+    result.insert ("unit_added".to_string(), UNIT_SIZE);
+    result.insert ("unit_removed".to_string(), UNIT_SIZE);
+    
+    result.insert ("move".to_string(), LOCATION_SIZE + UNIT_SIZE);
+    result.insert ("attack".to_string(), LOCATION_SIZE*2 + UNIT_SIZE*2 + 8);
+    result.insert ("recruit".to_string(), UNIT_SIZE);
     result
   }
 }
@@ -356,7 +362,7 @@ fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
         if remaining >= 0 {
           if remaining >0 {
            for double_adjacent in adjacent_locations (adjacent) {
-              if state.get (double_adjacent [0], double_adjacent [1]).unit.map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
+              if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
                 break;
               }
@@ -434,27 +440,38 @@ fn possible_unit_moves(state: & WesnothState, unit: & Unit)->Vec<WesnothMove> {
   results
 }
 
-fn calculate_moves (state: &mut WesnothState)->Vec<(WesnothMove, f32)> {
-  let mut results = vec![(WesnothMove::EndTurn, 0.0)];
-  
-  for location in state.locations.iter() {
+fn calculate_moves (state: &mut WesnothState) {
+  let mut added_moves: HashMap <usize,Vec<(WesnothMove, f32)>> = HashMap::new();
+  for (index, location) in state.locations.iter().enumerate() {
     if let Some (unit) = location.unit.as_ref() {
-      if location.unit_moves.is_none() {
-        location.unit_moves = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
+      if location.unit_moves.is_none() && unit.side == state.current_side {
+        added_moves.insert (index, possible_unit_moves (state, unit).into_iter().map (| action | {
           let evaluation = evaluate_move (& state.sides [state.current_side].player, & state.sides [state.current_side].memory, &represent_wesnoth_move (state, &action));
           (action, evaluation)
         }).collect());
       }
-      results.extend (location.unit_moves.as_ref().unwrap().into_iter().cloned());
     }
-    else {location.unit_moves = None;}
+  }
+  for (index, moves) in added_moves {
+    state.locations [index].unit_moves = Some (moves)
+  }
+}
+fn collect_moves (state: &mut WesnothState)->Vec<(WesnothMove, f32)> {
+  calculate_moves (state);
+  
+  let mut results = vec![(WesnothMove::EndTurn, 0.0)];
+  for (index, location) in state.locations.iter().enumerate() {
+    if let Some (moves) = location.unit_moves.as_ref() {
+      results.extend (moves.into_iter().cloned());
+    }
   }
   
   results
 }
 fn choose_move (state: &mut WesnothState)->WesnothMove {
-  let moves = calculate_moves (state);
-  moves.into_iter().min_by (|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap().0
+  let mut moves = collect_moves (state);
+  moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
+  moves.iter().rev().next().unwrap().0.clone()
 }
 fn play_move (state: &mut WesnothState, replay: &mut Replay, action: & WesnothMove) {
   
