@@ -491,5 +491,5 @@ fn main() {
   let mut s = String::new();
   f.read_to_string(&mut s).unwrap();
   let tiny_close_relation_data: Arc<WesnothMap> = serde_json::from_str(&s).unwrap();
-  println!("{}", serde_json::to_string (&random_organism(vec![5,5])).unwrap());
+  println!("return [============================[{}]============================]", serde_json::to_string (&random_organism(vec![5,5])).unwrap());
 }
