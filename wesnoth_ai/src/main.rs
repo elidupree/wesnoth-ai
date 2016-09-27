@@ -139,6 +139,7 @@ struct Attack {
 struct Side {
   gold: i32,
   enemies: HashSet <usize>,
+  recruits: Vec<String>,
   player: Arc <Organism>,
   memory: Memory,
 }
@@ -177,6 +178,7 @@ struct Location {
   terrain: String,
   village_owner: usize,
   unit: Option <Box <Unit>>,
+  unit_moves: Option <Vec<(WesnothMove, f32)>>,
 }
 #[derive (Clone, Serialize, Deserialize)]
 struct TerrainInfo{
@@ -216,6 +218,7 @@ struct WesnothState {
   sides: Vec<Side>,
   time_of_day: i32,
   turns_left: i32,
+  scores: Option <Vec<f32>>,
 }
 impl WesnothState {
   fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.map.width) as usize]}
@@ -343,8 +346,8 @@ fn adjacent_locations (coordinates: [i32; 2])->Vec<[i32; 2]> {
 }
 
 fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
-  let frontiers = vec![HashSet::new(); (unit.moves + 1) as usize];
-  let results = Vec::new();
+  let mut frontiers = vec![HashSet::new(); (unit.moves + 1) as usize];
+  let mut results = Vec::new();
   frontiers [unit.moves as usize].insert ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], HashSet::new()) {
@@ -361,18 +364,16 @@ fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
           }
           frontiers [remaining as usize].insert (adjacent);
         }
-      }
-      if state.get (location [0], location [1]).unit.is_none() {
-        results.push ((location, moves_left));
-      }
+      }    
+      results.push ((location, moves_left));
     }
   }
   results
 }
 
 fn recruit_hexes (state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
-  let discovered = HashSet::new();
-  let frontier = Vec::new();
+  let mut discovered = HashSet::new();
+  let mut frontier = Vec::new();
   if state.map.config.terrain_info.get (&state.get (unit.x, unit.y).terrain).unwrap().keep {
     frontier.push ([unit.x, unit.y]);
   }
@@ -387,44 +388,84 @@ fn recruit_hexes (state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
   discovered.into_iter().filter (| location | state.get (location [0], location [1]). unit.is_none()).collect()
 }
 
-fn possible_unit_moves(state: & WesnothState, unit: & Unit)->Vec<[i32; 2]> {
+fn possible_unit_moves(state: & WesnothState, unit: & Unit)->Vec<WesnothMove> {
   if unit.side != state.current_side {return Vec::new();}
   
-  let results = vec![];
+  let mut results = vec![];
 
   for location in find_reach (state, unit) {
-    
-      results.extend (possible_unit_moves (state, unit));
-    
+    let unit_there = state.get (location.0 [0], location.0 [1]).unit.as_ref();
+    if unit_there.is_none() {
+      results.push (WesnothMove::Move {
+        src_x: unit.x, src_y: unit.y,
+        dst_x: location.0 [0], dst_y: location.0 [1]
+      });
+    }
+    if unit.attacks_left > 0 && unit_there.map_or (true, | other | unit.x == other.x && unit.y == other.y) {
+      for adjacent in adjacent_locations (location.0) {
+        if let Some (neighbor) = state.get (adjacent [0], adjacent [1]).unit.as_ref() {
+          if state.is_enemy (unit.side, neighbor.side) {
+            for index in 0..unit.attacks.len() {
+              results.push (WesnothMove::Attack {
+                src_x: unit.x, src_y: unit.y,
+                dst_x: location.0 [0], dst_y: location.0 [1],
+                attack_x: adjacent [0], attack_y: adjacent [1],
+                weapon: index,
+              });
+            }
+          }
+        }
+      }
+    }
   }
-  
-  results
-}
-
-fn possible_moves (state: & WesnothState)->Vec<WesnothMove> {
-  let results = vec![WesnothMove::EndTurn];
-  
-  for location in state.locations.iter() {
-    if let Some (unit) = location.unit.as_ref() {
-      results.extend (possible_unit_moves (state, unit));
+  if unit.canrecruit {
+    for location in recruit_hexes (state, unit) {
+      for recruit in state.sides [unit.side].recruits.iter() {
+        if state.sides [unit.side].gold >= state.map.config.unit_type_examples.get (recruit).unwrap().cost {
+          results.push (WesnothMove::Recruit {
+            dst_x: location [0], dst_y: location [1],
+            unit_type: recruit.clone(),
+          });
+        }
+      }
     }
   }
   
   results
 }
 
-fn play_move (state: &mut WesnothState, replay: &mut Replay) {
-  let playing_side = &state.sides [state.current_side];
-  let moves: Vec<_> = possible_moves (state).into_iter().map (| action | {
-    let evaluation = evaluate_move (&playing_side.player, &playing_side.memory, &represent_wesnoth_move (state, &action));
-    (action, evaluation)
-  }).collect();
-  moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
+fn calculate_moves (state: &mut WesnothState)->Vec<(WesnothMove, f32)> {
+  let mut results = vec![(WesnothMove::EndTurn, 0.0)];
+  
+  for location in state.locations.iter() {
+    if let Some (unit) = location.unit.as_ref() {
+      if location.unit_moves.is_none() {
+        location.unit_moves = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
+          let evaluation = evaluate_move (& state.sides [state.current_side].player, & state.sides [state.current_side].memory, &represent_wesnoth_move (state, &action));
+          (action, evaluation)
+        }).collect());
+      }
+      results.extend (location.unit_moves.as_ref().unwrap().into_iter().cloned());
+    }
+    else {location.unit_moves = None;}
+  }
+  
+  results
 }
-
-fn play_game (player: & Organism, map: & WesnothMap)->Replay {
+fn choose_move (state: &mut WesnothState)->WesnothMove {
+  let moves = calculate_moves (state);
+  moves.into_iter().min_by (|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap().0
+}
+fn play_move (state: &mut WesnothState, replay: &mut Replay, action: & WesnothMove) {
   
 }
+
+fn generate_starting_state (map: & WesnothMap, players: Vec<Arc <Organism>>)->WesnothState {
+  unimplemented!()
+}
+//fn play_game (player: & Organism, map: & WesnothMap)->Replay {
+  //
+//}
 
 use std::fs::File;
 use std::io::Read;
