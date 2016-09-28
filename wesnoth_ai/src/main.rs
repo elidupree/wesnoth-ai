@@ -416,8 +416,9 @@ fn combat_results (state: & WesnothState, attacker: & Unit, defender: & Unit, we
     Combatant {
       unit: Box::new (unit.clone()),
       swings_left: attack.map_or (0, | attack | attack.number),
-      damage: attack.map_or (0, | attack | attack.damage),
-      chance: 50,
+      // TODO: correct rounding direction
+      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100) / 100),
+      chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
     }
   };
   
