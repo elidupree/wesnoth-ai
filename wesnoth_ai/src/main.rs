@@ -223,7 +223,8 @@ struct WesnothState {
   locations: Vec<Location>,
   sides: Vec<Side>,
   time_of_day: i32,
-  turns_left: i32,
+  turn: i32,
+  max_turns: i32,
   scores: Option <Vec<f32>>,
 }
 impl WesnothState {
@@ -294,7 +295,7 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
         input_type: "attack".to_string(),
         vector: represent_location (state, dst_x, dst_y).into_iter()
           .chain(represent_location (state, attack_x, attack_y))
-          .chain(represent_unit (state, &state.get (dst_x, dst_y).unit.as_ref().unwrap()))
+          .chain(represent_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap()))
           .chain(represent_unit (state, &state.get (attack_x, attack_y).unit.as_ref().unwrap()))
           .chain (vec![0.2, 0.2, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0])
           .collect()
@@ -364,7 +365,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
     & WesnothMove::EndTurn => {
       state.current_side += 1;
       if state.current_side >= state.sides.len() {
-        state.turns_left -= 1;
+        state.turn += 1;
         state.current_side = 0;
       }
       let mut added_units = Vec::new();
@@ -393,6 +394,13 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       }
     },
   }
+  
+  for side in state.sides.iter_mut() {
+    for input in results.iter() {
+      side.memory = next_memory (& side.player, & side.memory, input);
+    }
+  }
+  
   results
 }
 
@@ -577,8 +585,64 @@ fn play_move (state: &mut WesnothState, replay: &mut Replay, action: & WesnothMo
   
 }
 
-fn generate_starting_state (map: & WesnothMap, players: Vec<Arc <Organism>>)->WesnothState {
-  unimplemented!()
+fn generate_starting_state (map: Arc <WesnothMap>, players: Vec<Arc <Organism>>)->WesnothState {
+
+/*
+
+#[derive (Clone, Serialize, Deserialize)]
+struct WesnothConfig {
+  unit_type_examples: HashMap <String, Unit>,
+  terrain_info: HashMap <String, TerrainInfo>,
+  factions: Vec<Faction>,
+}
+
+#[derive (Clone, Serialize, Deserialize)]
+struct WesnothMap {
+  config: Arc <WesnothConfig>,
+  width: i32,
+  height: i32,
+  locations: Vec<Location>,
+  starting_locations: Vec<[i32; 2]>,
+}*/
+  let mut side_assignments: Vec<_> = (0.. players.len()).collect();
+  rand::thread_rng().shuffle (&mut side_assignments);
+  let mut locations = map.locations.clone();
+  let mut sides = Vec::new();
+  for (index, player) in players.into_iter().enumerate() {
+    let faction = rand::thread_rng().choose (&map.config.factions).unwrap();
+    let mut leader = Box::new (map.config.unit_type_examples.get (rand::thread_rng().choose (&faction.leaders).unwrap()).unwrap().clone());
+    leader.x = map.starting_locations [index][0]-1;
+    leader.y = map.starting_locations [index][1]-1;
+    leader.side = index;
+    let location_index =(leader.x+leader.y*map.width) as usize;
+    locations [location_index].unit = Some (leader);
+    let mut enemies = HashSet::new(); enemies.insert ((index + 1) % 2);
+    sides.push (Side {
+      gold: 40,
+      enemies: enemies,
+      recruits: faction.recruits.clone(),
+      player: player.clone(),
+      memory: initial_memory (& player),
+    });
+  }
+  WesnothState {
+    map: map,
+    current_side: 0,
+    locations: locations,
+    sides: sides,
+    time_of_day: 0,
+    turn: 1,
+    max_turns: 30,
+    scores: None,
+  }
+}
+fn compete (map: Arc <WesnothMap>, players: Vec<Arc <Organism>>)->Vec<f32> {
+  let mut state = generate_starting_state (map, players);
+  while state.scores.is_none() {
+    let choice = choose_move (&mut state);
+    apply_wesnoth_move (&mut state, &choice);
+  }
+  state.scores.unwrap()
 }
 //fn play_game (player: & Organism, map: & WesnothMap)->Replay {
   //
@@ -591,5 +655,27 @@ fn main() {
   let mut s = String::new();
   f.read_to_string(&mut s).unwrap();
   let tiny_close_relation_data: Arc<WesnothMap> = serde_json::from_str(&s).unwrap();
-  println!("return [============================[{}]============================]", serde_json::to_string (&random_organism(vec![5,5])).unwrap());
+  let map = tiny_close_relation_data;
+  
+  struct Stats {
+    rating: f32,
+  }
+  fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
+  let mut organisms = Vec::new();
+  for iteration in 0..100 {
+    while organisms.len() < 10 {
+      organisms.push (random_organism_default());
+    }
+    for index in 0..(organisms.len()-1) {
+      let results = compete (map.clone(), vec![organisms [index].0.clone(), organisms [index + 1].0.clone()]);
+      if results [1] <= 0.0 || organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
+        organisms [index].1.rating += results [0];
+      }
+      organisms [index + 1].1.rating += results [1];
+    }
+    organisms.sort_by (|a, b| b.1.rating.partial_cmp(&a.1.rating).unwrap());
+    organisms.retain (| &(_, Stats {ref rating})| *rating >= 0.0);
+  }
+  
+  println!("return [============================[{}]============================]", serde_json::to_string (& organisms [0].0).unwrap());
 }
