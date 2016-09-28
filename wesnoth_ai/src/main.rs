@@ -340,7 +340,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       let mut defender = state.get_mut (attack_x, attack_y).unit.take().unwrap();
       attacker.moves = 0;
       attacker.attacks_left -= 1;
-      let (new_attacker, new_defender) = combat_results (state, &attacker, &defender);
+      let (new_attacker, new_defender) = combat_results (state, &attacker, &defender, weapon);
       
       results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: represent_unit (state, & attacker)});
       if let Some (unit) = new_attacker.as_ref() {
@@ -404,8 +404,50 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
   results
 }
 
-fn combat_results (state: & WesnothState, attacker: & Unit, defender: & Unit)->(Option <Box <Unit>>, Option <Box <Unit>>) {
-  unimplemented!()
+fn combat_results (state: & WesnothState, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
+  
+  struct Combatant {
+    unit: Box <Unit>,
+    swings_left: i32,
+    damage: i32,
+    chance: i32,
+  }
+  let make_combatant = |unit: &Unit, attack: Option <& Attack>, other: & Unit|->Combatant {
+    Combatant {
+      unit: Box::new (unit.clone()),
+      swings_left: attack.map_or (0, | attack | attack.number),
+      damage: attack.map_or (0, | attack | attack.damage),
+      chance: 50,
+    }
+  };
+  
+  fn swing (swinger: &mut Combatant, victim: &mut Combatant)->bool {
+    swinger.swings_left -= 1;
+    if rand::thread_rng().gen_range (0, 100) >= swinger.chance {return true;}
+    victim.unit.hitpoints -= swinger.damage;
+    return victim.unit.hitpoints >0;
+  }
+  
+  let attacker_attack = &attacker.attacks [weapon];
+  // TODO: actual selection of best defender attack
+  let defender_attack = defender.attacks.iter().find(| attack | attack.range == attacker_attack.range);
+  
+  let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
+  let mut dc = make_combatant (defender, defender_attack, attacker);
+  
+  while ac.swings_left > 0 || dc.swings_left > 0 {
+    if ac.swings_left > 0 {
+      if !swing (&mut ac, &mut dc) { break; }
+    }
+    if dc.swings_left > 0 {
+      if !swing (&mut dc, &mut ac) { break; }
+    }
+  }
+  
+  (
+    if ac.unit.hitpoints >0 {Some (ac.unit)} else {None},
+    if dc.unit.hitpoints >0 {Some (dc.unit)} else {None},
+  )
 }
 
 struct Replay {
