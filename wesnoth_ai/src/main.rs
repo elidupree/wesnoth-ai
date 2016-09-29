@@ -728,11 +728,15 @@ struct WesnothMap {
   }
 }
 fn compete (map: Arc <WesnothMap>, players: Vec<Arc <Organism>>)->Vec<f32> {
+  println!("Beginning competition...");
+  let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
   while state.scores.is_none() {
     let choice = choose_move (&mut state);
     apply_wesnoth_move (&mut state, &choice);
   }
+  let duration = start.elapsed();
+  println!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
   state.scores.unwrap()
 }
 //fn play_game (player: & Organism, map: & WesnothMap)->Replay {
