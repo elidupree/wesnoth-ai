@@ -20,7 +20,7 @@ thread_local! {
   }
 }
 
-pub fn multiply_into (input: &[f32], output: &mut [f32], matrix: & Matrix) {
+pub fn multiply_into (input: &[f64], output: &mut [f64], matrix: & Matrix) {
   assert_eq!(input.len(), matrix.input_size);
   assert_eq!(output.len(), matrix.output_size);
   for input_index in 0..matrix.input_size {
@@ -53,7 +53,7 @@ pub fn initial_memory (organism: & Organism)->Memory {
   result 
 }
 
-pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)->f32 {
+pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)->f64 {
   if input.input_type == "end_turn" {return 0.0;}
   let mut output = vec![0.0];
   multiply_into (&next_memory (organism, memory, input).layers.last().unwrap(), &mut output, & organism.output_weights);
@@ -61,39 +61,39 @@ pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInp
 }
 
 
-pub fn neural_bool (value: bool)->f32 {if value {1.0} else {0.0}}
+pub fn neural_bool (value: bool)->f64 {if value {1.0} else {0.0}}
 
 const LOCATION_SIZE: usize = 6;
-pub fn neural_location (state: & fake_wesnoth::State,x: i32,y: i32)->Vec<f32> {
+pub fn neural_location (state: & fake_wesnoth::State,x: i32,y: i32)->Vec<f64> {
   let terrain = & state.get (x, y).terrain;
   let info = state.map.config.terrain_info.get (terrain).unwrap();
   vec![
-    x as f32, y as f32,
+    x as f64, y as f64,
     neural_bool (info. keep), neural_bool (info.castle), neural_bool (info.village),
-    info.healing as f32,
+    info.healing as f64,
   ]
 }
 
 const UNIT_SIZE: usize = 23;
-pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<f32> {
+pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<f64> {
   let terrain = & state.get (unit.x, unit.y).terrain;
   vec![
-    unit.x as f32, unit.y as f32,
-    unit.moves as f32, unit.attacks_left as f32,
-    unit.hitpoints as f32, (unit.max_experience - unit.experience) as f32,
+    unit.x as f64, unit.y as f64,
+    unit.moves as f64, unit.attacks_left as f64,
+    unit.hitpoints as f64, (unit.max_experience - unit.experience) as f64,
     neural_bool (!state.is_enemy (state.current_side, unit.side)), neural_bool (unit.canrecruit),
-    unit.max_hitpoints as f32, unit.max_moves as f32,
+    unit.max_hitpoints as f64, unit.max_moves as f64,
     neural_bool (unit.slowed), neural_bool (unit.poisoned), neural_bool (unit.not_living),
-    unit.alignment as f32,
+    unit.alignment as f64,
     neural_bool (unit.zone_of_control),
-    unit.resistance.get ("blade").unwrap().clone() as f32,
-    unit.resistance.get ("pierce").unwrap().clone() as f32,
-    unit.resistance.get ("impact").unwrap().clone() as f32,
-    unit.resistance.get ("fire").unwrap().clone() as f32,
-    unit.resistance.get ("cold").unwrap().clone() as f32,
-    unit.resistance.get ("arcane").unwrap().clone() as f32,
-    unit.defense.get (terrain).unwrap().clone() as f32,
-    unit.movement_costs.get (terrain).unwrap().clone() as f32,
+    unit.resistance.get ("blade").unwrap().clone() as f64,
+    unit.resistance.get ("pierce").unwrap().clone() as f64,
+    unit.resistance.get ("impact").unwrap().clone() as f64,
+    unit.resistance.get ("fire").unwrap().clone() as f64,
+    unit.resistance.get ("cold").unwrap().clone() as f64,
+    unit.resistance.get ("arcane").unwrap().clone() as f64,
+    unit.defense.get (terrain).unwrap().clone() as f64,
+    unit.movement_costs.get (terrain).unwrap().clone() as f64,
     
   ]
 }
@@ -196,7 +196,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
 }
 
 pub fn calculate_moves (state: &mut fake_wesnoth::State) {
-  let mut added_moves: HashMap <usize,Vec<(fake_wesnoth::Move, f32)>> = HashMap::new();
+  let mut added_moves: HashMap <usize,Vec<(fake_wesnoth::Move, f64)>> = HashMap::new();
   for (index, location) in state.locations.iter().enumerate() {
     if let Some (unit) = location.unit.as_ref() {
       if location.unit_moves.is_none() && unit.side == state.current_side {
@@ -220,7 +220,7 @@ pub fn invalidate_moves (state: &mut fake_wesnoth::State, origin: [i32; 2], extr
   }
 }
 
-pub fn collect_moves (state: &mut fake_wesnoth::State)->Vec<(fake_wesnoth::Move, f32)> {
+pub fn collect_moves (state: &mut fake_wesnoth::State)->Vec<(fake_wesnoth::Move, f64)> {
   calculate_moves (state);
   
   let mut results = vec![(fake_wesnoth::Move::EndTurn, 0.0)];

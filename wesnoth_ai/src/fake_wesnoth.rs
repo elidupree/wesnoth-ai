@@ -57,7 +57,7 @@ pub struct Location {
   pub terrain: String,
   pub village_owner: usize,
   pub unit: Option <Box <Unit>>,
-  pub unit_moves: Option <Vec<(Move, f32)>>,
+  pub unit_moves: Option <Vec<(Move, f64)>>,
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct TerrainInfo{
@@ -98,7 +98,7 @@ pub struct State {
   pub time_of_day: i32,
   pub turn: i32,
   pub max_turns: i32,
-  pub scores: Option <Vec<f32>>,
+  pub scores: Option <Vec<f64>>,
 }
 impl State {
   pub fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}

@@ -35,13 +35,13 @@ pub struct Organism {
 pub struct LayerWeights {
   hidden_matrix: Matrix,
   input_matrix: Matrix,
-  bias: Vec<f32>,
+  bias: Vec<f64>,
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Matrix {
   input_size: usize,
   output_size: usize,
-  weights: Vec<f32>,
+  weights: Vec<f64>,
 
 }
 
@@ -53,7 +53,7 @@ fn random_matrix (input_size: usize, output_size: usize)->Matrix {
     weights: Vec::with_capacity (input_size*output_size),
   };
   for _ in 0..input_size*output_size {
-    result.weights.push (random::<f32>() * 2.0 - 1.0);
+    result.weights.push (random::<f64>() * 2.0 - 1.0);
   }
   result
 }
@@ -94,22 +94,22 @@ fn mutated_organism (original: & Organism)->Organism {
   mutate_vector (&mut result.output_weights.weights, mutation_rate, mutation_size);
   result
 }
-fn mutate_vector (vector: &mut Vec<f32>, mutation_rate: f64, mutation_size: f64) {
+fn mutate_vector (vector: &mut Vec<f64>, mutation_rate: f64, mutation_size: f64) {
   for value in vector.iter_mut() {
     if mutation_rate > random::<f64>()*100.0 {
-      *value += ((random::<f64>() *2.0f64 - 1.0f64) * mutation_size*0.2f64) as f32;
+      *value += ((random::<f64>() *2.0f64 - 1.0f64) * mutation_size*0.2f64) as f64;
     }
   }
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Memory {
-  layers: Vec<Vec<f32>>,
+  layers: Vec<Vec<f64>>,
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct NeuralInput {
   input_type: String,
-  vector: Vec<f32>
+  vector: Vec<f64>
 }
 
 /*
@@ -120,11 +120,11 @@ pub struct Replay {
   wesnoth_moves: Vec<WesnothMove>,
   neural_inputs: Vec<NeuralInput>,
   branches: Vec<Replay>,
-  scores_by_side: Vec<f32>,
+  scores_by_side: Vec<f64>,
 }
 
 
-fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f32 {
+fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f64 {
   let mut memory = initial_memory (analyzer);
   for neural_input in replay.neural_inputs.iter() {
     memory = next_memory (analyzer, &memory, neural_input);
@@ -141,12 +141,12 @@ fn analyze_fitness (replay: & Replay, analyzer: & Organism)->f32 {
   
   choices.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
   for (index, choice) in choices.iter().enumerate() {
-    unadjusted += (choices.len() - index) as f32 * choice.0;
+    unadjusted += (choices.len() - index) as f64 * choice.0;
   }
   choices.sort_by (|a, b| a.0.partial_cmp(&b.0).unwrap());
   for (index, choice) in choices.iter().enumerate() {
-    worst_possible += (choices.len() - index) as f32 * choice.0;
-    best_possible += (1 + index) as f32 * choice.0;
+    worst_possible += (choices.len() - index) as f64 * choice.0;
+    best_possible += (1 + index) as f64 * choice.0;
   }
   
   (unadjusted - worst_possible)/(best_possible - worst_possible)
@@ -192,7 +192,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
     scores: None,
   }
 }
-fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f32> {
+fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64> {
   printlnerr!("Beginning competition...");
   let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
@@ -218,7 +218,7 @@ fn main() {
   let map = tiny_close_relation_data;
   
   struct Stats {
-    rating: f32,
+    rating: f64,
   }
   fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
   let mut organisms = Vec::new();
@@ -226,7 +226,7 @@ fn main() {
     let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
       organisms.push (random_organism_default());
-      if was_empty || random::<f32> () <0.2 {
+      if was_empty || random::<f64> () <0.2 {
         organisms.push (random_organism_default());
       }
       else {
