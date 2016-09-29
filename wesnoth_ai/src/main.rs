@@ -316,7 +316,7 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
       example.y = dst_y;
       
       NeuralInput {
-        input_type: "move".to_string(),
+        input_type: "recruit".to_string(),
         vector: represent_unit (state, & example),
       }
     },
@@ -720,6 +720,7 @@ struct WesnothMap {
     leader.side = index;
     leader.moves = leader.max_moves;
     leader.attacks_left = 1;
+    leader.canrecruit = true;
     let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;
     locations [location_index].unit = Some (leader);
     let mut enemies = HashSet::new(); enemies.insert ((index + 1) % 2);
