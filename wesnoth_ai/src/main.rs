@@ -15,6 +15,7 @@ macro_rules! printlnerr(
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{Rng, random};
+use serde::Serialize;
 
 mod fake_wesnoth;
 use fake_wesnoth::{Map as WesnothMap, State as WesnothState};
@@ -181,7 +182,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
       memory: initial_memory (& player),
     });
   }
-  fake_wesnoth::State {
+  let mut state = fake_wesnoth::State {
     map: map,
     current_side: 0,
     locations: locations,
@@ -190,7 +191,12 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
     turn: 1,
     max_turns: 30,
     scores: None,
+  };
+  let input = neural_turn_started (&state);
+  for side in state.sides.iter_mut() {
+    side.memory = next_memory (& side.player, & side.memory, &NeuralInput {input_type: "turn_started".to_string(), vector: input.clone() });
   }
+  state
 }
 fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64> {
   printlnerr!("Beginning competition...");
@@ -246,5 +252,28 @@ fn main() {
     organisms.retain (| &(_, Stats {ref rating})| *rating >= 0.0);
   }
   
-  println!("return [============================[{}]============================]", serde_json::to_string (& organisms [0].0).unwrap());
+  fn do_test <Input: Serialize, Output: Serialize, Function: Fn (Input)->Output> (input: Input, function_name: &str, function: Function) {
+    println!( "{{
+      tested_function = [=[{}]=],
+      input = [=[{}]=],
+      output = [=[{}]=]}},", function_name, serde_json::to_string (& input).unwrap(), serde_json::to_string (& function (input)).unwrap());
+  }
+  
+  println!("return {{
+    organism = [============================[{}]============================],
+    tests = {{", serde_json::to_string (& organisms [0].0).unwrap());
+  
+  for _ in 0..20 {
+    do_test (random::<f64>()*50.0 - 25.0, "hyperbolic_tangent", hyperbolic_tangent);
+  }
+  let test_organism =random_organism (vec![3, 3]);
+  do_test (
+    (test_organism.clone(),
+      initial_memory (&test_organism),
+      NeuralInput {input_type: "turn_started".to_string(), vector: vec![40.0,4.0,40.0,4.0]}),
+    "next_memory",
+    |(organism, memory, input)| next_memory (&organism, &memory, &input));
+  
+  println!("}},
+  }}")
 }

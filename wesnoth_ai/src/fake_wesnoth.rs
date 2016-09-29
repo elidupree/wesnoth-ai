@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{self, Rng, random};
@@ -231,6 +230,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       for location in state.locations.iter_mut() {
         location.unit_moves = None;
       }
+      results.push (NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
     },
   }
   

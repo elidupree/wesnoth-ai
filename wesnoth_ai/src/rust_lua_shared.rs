@@ -106,6 +106,12 @@ pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->V
   ]
 }
 
+pub fn neural_turn_started (state: & fake_wesnoth::State)->Vec<f64> {
+  let my_side = &state.sides [state.current_side];
+  let enemy = &state.sides [(state.current_side+1)&1];
+  vec![my_side.gold as f64, 4.0, enemy.gold as f64, 4.0]
+}
+
 pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::Move)->NeuralInput {
   match input {
     &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, ..} => NeuralInput {
