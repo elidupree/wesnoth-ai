@@ -18,7 +18,7 @@ use rand::{Rng, random};
 
 /// One individual "organism" shareable with Lua.
 /// Represents a function from game state to move evaluations.
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Organism {
   signature: String,
   layer_sizes: Vec<usize>,
@@ -26,13 +26,13 @@ struct Organism {
   output_weights: Matrix,
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct LayerWeights {
   hidden_matrix: Matrix,
   input_matrix: Matrix,
   bias: Vec<f32>,
 }
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Matrix {
   input_size: usize,
   output_size: usize,
@@ -89,34 +89,11 @@ fn random_organism (layer_sizes: Vec<usize>)->Organism {
   result
 }
 
-use rand::distributions::exponential::Exp1;
-fn mutated_organism (original: & Organism)->Organism {
-  let Exp1(mutation_rate) = random();
-  let Exp1(mutation_size) = random();
-  let mut result = original.clone();
-  for weights in result.weights_by_input.iter_mut() {
-    for something in weights.1.iter_mut() {
-      mutate_vector (&mut something.hidden_matrix.weights, mutation_rate, mutation_size);
-      mutate_vector (&mut something.input_matrix.weights, mutation_rate, mutation_size);
-      mutate_vector (&mut something.bias, mutation_rate, mutation_size);
-    }
-  }
-  mutate_vector (&mut result.output_weights.weights, mutation_rate, mutation_size);
-  result
-}
-fn mutate_vector (vector: &mut Vec<f32>, mutation_rate: f64, mutation_size: f64) {
-  for value in vector.iter_mut() {
-    if mutation_rate > random::<f64>()*100.0 {
-      *value += ((random::<f64>() *2.0f64 - 1.0f64) * mutation_size*0.2f64) as f32;
-    }
-  }
-}
-
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Memory {
   layers: Vec<Vec<f32>>,
 }
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct NeuralInput {
   input_type: String,
   vector: Vec<f32>
@@ -163,7 +140,7 @@ fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)-
 }
 
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Attack {
   damage: i32,
   number: i32,
@@ -171,7 +148,7 @@ struct Attack {
   range: String,
   // TODO: specials
 }
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Side {
   gold: i32,
   enemies: HashSet <usize>,
@@ -181,7 +158,7 @@ struct Side {
 }
 
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Unit {
   x: i32,
   y: i32,
@@ -209,14 +186,14 @@ struct Unit {
   // TODO: abilities
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Location {
   terrain: String,
   village_owner: usize,
   unit: Option <Box <Unit>>,
   unit_moves: Option <Vec<(WesnothMove, f32)>>,
 }
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct TerrainInfo{
   keep: bool,
   castle: bool,
@@ -224,20 +201,20 @@ struct TerrainInfo{
   healing: i32,
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct Faction {
   recruits: Vec<String>,
   leaders: Vec<String>,
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct WesnothConfig {
   unit_type_examples: HashMap <String, Unit>,
   terrain_info: HashMap <String, TerrainInfo>,
   factions: Vec<Faction>,
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct WesnothMap {
   config: Arc <WesnothConfig>,
   width: i32,
@@ -246,7 +223,7 @@ struct WesnothMap {
   starting_locations: Vec<[i32; 2]>,
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 struct WesnothState {
   map: Arc <WesnothMap>,
   current_side: usize,
@@ -263,7 +240,7 @@ impl WesnothState {
   fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
-#[derive (Clone, Serialize, Deserialize)]
+#[derive (Clone, Serialize, Deserialize, Debug)]
 enum WesnothMove {
   Move {
     src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, moves_left: i32,
@@ -339,7 +316,7 @@ fn represent_wesnoth_move (state: &WesnothState, input: & WesnothMove)->NeuralIn
       example.y = dst_y;
       
       NeuralInput {
-        input_type: "move".to_string(),
+        input_type: "recruit".to_string(),
         vector: represent_unit (state, & example),
       }
     },
@@ -363,6 +340,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       invalidate_moves (state, [dst_x, dst_y], 0);
     },
     &WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+      printlnerr!("Attack: {:?}", input);
       if src_x != dst_x || src_y != dst_y {
         results.extend (apply_wesnoth_move (state, &WesnothMove::Move {
           src_x: src_x, src_y: src_y, dst_x: dst_x, dst_y: dst_y, moves_left: 0
@@ -704,6 +682,7 @@ fn collect_moves (state: &mut WesnothState)->Vec<(WesnothMove, f32)> {
 fn choose_move (state: &mut WesnothState)->WesnothMove {
   let mut moves = collect_moves (state);
   moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
+  //printlnerr!("Moves: {:?}", moves);
   moves.iter().rev().next().unwrap().0.clone()
 }
 fn play_move (state: &mut WesnothState, replay: &mut Replay, action: & WesnothMove) {
@@ -741,6 +720,7 @@ struct WesnothMap {
     leader.side = index;
     leader.moves = leader.max_moves;
     leader.attacks_left = 1;
+    leader.canrecruit = true;
     let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;
     locations [location_index].unit = Some (leader);
     let mut enemies = HashSet::new(); enemies.insert ((index + 1) % 2);
@@ -794,15 +774,8 @@ fn main() {
   fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
   let mut organisms = Vec::new();
   for iteration in 0..100 {
-    let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
-      if was_empty || random::<f32> () <0.2 {
-        organisms.push (random_organism_default());
-      }
-      else {
-        let new_organism = Arc::new (mutated_organism (&organisms [0].0));
-        organisms.push ((new_organism, Stats {rating: 0.0}));
-      }
+      organisms.push (random_organism_default());
     }
     for index in 0..(organisms.len()-1) {
       if organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
