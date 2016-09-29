@@ -30,7 +30,7 @@ pub fn next_memory (organism: & Organism, memory: & Memory, input: &NeuralInput)
     let layer_weights = &organism.weights_by_input.get (& input.input_type).unwrap()[layer];
     let mut next_layer = layer_weights.bias.clone();
     multiply_into (&memory.layers [layer], &mut next_layer, & layer_weights.hidden_matrix);
-    multiply_into (if layer == 0 {&input.vector} else {& memory.layers [layer - 1]}, &mut next_layer, & layer_weights.input_matrix);
+    multiply_into (if layer == 0 {&input.vector} else {& result.layers [layer - 1]}, &mut next_layer, & layer_weights.input_matrix);
     for item in next_layer.iter_mut() {
       *item = hyperbolic_tangent (*item);
     }
