@@ -228,8 +228,8 @@ struct WesnothState {
   scores: Option <Vec<f32>>,
 }
 impl WesnothState {
-  fn get (&self, x: i32,y: i32)->&Location {& self.locations [(x+y*self.map.width) as usize]}
-  fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [(x+y*self.map.width) as usize]}
+  fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}
+  fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [((x-1)+(y-1)*self.map.width) as usize]}
   fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
@@ -329,6 +329,8 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       unit.resting = false;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, &unit)});
       state.get_mut (dst_x, dst_y).unit = Some (unit);
+      invalidate_moves (state, [src_x, src_y], 0);
+      invalidate_moves (state, [dst_x, dst_y], 0);
     },
     &WesnothMove::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
       if src_x != dst_x || src_y != dst_y {
@@ -351,8 +353,29 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
         results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, unit)});
       }
       
+      let check_game_over = (attacker.canrecruit && new_attacker.is_none()) || (defender.canrecruit && new_defender.is_none());
+      
       state.get_mut (dst_x, dst_y).unit = new_attacker;
       state.get_mut (attack_x, attack_y).unit = new_defender;
+      
+      if check_game_over {
+        let mut remaining_leaders = Vec::new();
+        for location in state.locations.iter() {
+          if let Some (unit) = location.unit.as_ref() {
+            if unit.canrecruit {
+              remaining_leaders.push (unit);
+            }
+          }
+        }
+        assert! (remaining_leaders.len() >0);
+        // TODO: allow allies and stuff
+        if remaining_leaders.len() == 1 {
+          state.scores = Some (vec![-1.0; state.sides.len()]);
+          state.scores.as_mut().unwrap()[remaining_leaders [0].side] = 1.0;
+        }
+      }
+      invalidate_moves (state, [dst_x, dst_y], 1);
+      invalidate_moves (state, [attack_x, attack_y], 1);
     }
     &WesnothMove::Recruit {dst_x, dst_y, ref unit_type} => {
       let mut unit = Box::new (state.map.config.unit_type_examples.get (unit_type).unwrap().clone());
@@ -361,6 +384,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       unit.y = dst_y;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, &unit)});
       state.get_mut (dst_x, dst_y).unit = Some (unit);
+      invalidate_moves (state, [dst_x, dst_y], 0);
     },
     & WesnothMove::EndTurn => {
       state.current_side += 1;
@@ -391,6 +415,13 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       for index in added_units {
         let unit = state.locations[index].unit.as_ref().unwrap();
         results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, unit)});
+      }
+      if state.turn >state.max_turns {
+        // timeout = everybody loses
+        state.scores = Some (vec![-1.0; state.sides.len()]);
+      }
+      for location in state.locations.iter_mut() {
+        location.unit_moves = None;
       }
     },
   }
@@ -498,7 +529,15 @@ fn adjacent_locations (map: & WesnothMap, coordinates: [i32; 2])->Vec<[i32; 2]> 
     [coordinates [0]-1, coordinates [1] - 1 + (coordinates [0]&1)],
     [coordinates [0]+1, coordinates [1] + (coordinates [0]&1)],
     [coordinates [0]+1, coordinates [1] - 1 + (coordinates [0]&1)],
-  ].into_iter().filter (|&[x,y]| x >= 0 && y >= 0 && x < map.width && y < map.height).collect()
+  ].into_iter().filter (|&[x,y]| x >= 1 && y >= 1 && x <= map.width && y <= map.height).collect()
+}
+
+fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {
+  let horizontal = (first [0] - second [0]).abs();
+  let vertical = (first [1] - second [1]).abs() + 
+    if (first [1] <second [1] && (first [0] & 1) == 1 && (second [0] & 1) == 0) ||
+       (first [1] >second [1] && (first [0] & 1) == 0 && (second [0] & 1) == 1) {1} else {0};
+  return ::std::cmp::max (horizontal, vertical + horizontal/2);
 }
 
 fn find_reach (state: & WesnothState, unit: & Unit)->Vec<([i32; 2], i32)> {
@@ -607,6 +646,15 @@ fn calculate_moves (state: &mut WesnothState) {
     state.locations [index].unit_moves = Some (moves)
   }
 }
+
+fn invalidate_moves (state: &mut WesnothState, origin: [i32; 2], extra_turns: i32) {
+  for location in state.locations.iter_mut() {
+    if location.unit.as_ref().map_or (true, | unit | distance_between ([unit.x, unit.y], origin) <= unit.moves + 1 + extra_turns*unit.max_moves) {
+      location.unit_moves = None;
+    }
+  }
+}
+
 fn collect_moves (state: &mut WesnothState)->Vec<(WesnothMove, f32)> {
   calculate_moves (state);
   
@@ -654,10 +702,10 @@ struct WesnothMap {
   for (index, player) in players.into_iter().enumerate() {
     let faction = rand::thread_rng().choose (&map.config.factions).unwrap();
     let mut leader = Box::new (map.config.unit_type_examples.get (rand::thread_rng().choose (&faction.leaders).unwrap()).unwrap().clone());
-    leader.x = map.starting_locations [index][0]-1;
-    leader.y = map.starting_locations [index][1]-1;
+    leader.x = map.starting_locations [index][0];
+    leader.y = map.starting_locations [index][1];
     leader.side = index;
-    let location_index =(leader.x+leader.y*map.width) as usize;
+    let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;
     locations [location_index].unit = Some (leader);
     let mut enemies = HashSet::new(); enemies.insert ((index + 1) % 2);
     sides.push (Side {
@@ -710,11 +758,12 @@ fn main() {
       organisms.push (random_organism_default());
     }
     for index in 0..(organisms.len()-1) {
-      let results = compete (map.clone(), vec![organisms [index].0.clone(), organisms [index + 1].0.clone()]);
-      if results [1] <= 0.0 || organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
+      if organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
+        let results = compete (map.clone(), vec![organisms [index].0.clone(), organisms [index + 1].0.clone()]);
         organisms [index].1.rating += results [0];
+        organisms [index + 1].1.rating += results [1];
       }
-      organisms [index + 1].1.rating += results [1];
+      
     }
     organisms.sort_by (|a, b| b.1.rating.partial_cmp(&a.1.rating).unwrap());
     organisms.retain (| &(_, Stats {ref rating})| *rating >= 0.0);
