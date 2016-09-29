@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{Rng, random};
@@ -6,18 +5,12 @@ use rand::{Rng, random};
 use fake_wesnoth;
 use super::*;
 
-thread_local! {
-  pub static INPUTS: HashMap <String, usize> = {
-    let mut result = HashMap::new();
-    result.insert ("turn_started".to_string(), 4);
-    result.insert ("unit_added".to_string(), UNIT_SIZE);
-    result.insert ("unit_removed".to_string(), UNIT_SIZE);
-    
-    result.insert ("move".to_string(), LOCATION_SIZE + UNIT_SIZE);
-    result.insert ("attack".to_string(), LOCATION_SIZE*2 + UNIT_SIZE*2 + 8);
-    result.insert ("recruit".to_string(), UNIT_SIZE);
-    result
-  }
+//Avoid the built in tanh, to guarantee my consistency with Lua
+pub fn hyperbolic_tangent (value: f64)->f64 {
+  if value >  18.0 {return  1.0;}
+  if value < -18.0 {return -1.0;}
+  let term = (value*2.0).exp();
+  return (term - 1.0)/(term + 1.0)
 }
 
 pub fn multiply_into (input: &[f64], output: &mut [f64], matrix: & Matrix) {
@@ -38,7 +31,9 @@ pub fn next_memory (organism: & Organism, memory: & Memory, input: &NeuralInput)
     let mut next_layer = layer_weights.bias.clone();
     multiply_into (&memory.layers [layer], &mut next_layer, & layer_weights.hidden_matrix);
     multiply_into (if layer == 0 {&input.vector} else {& memory.layers [layer - 1]}, &mut next_layer, & layer_weights.input_matrix);
-    for item in next_layer.iter_mut() {*item = item.tanh();}
+    for item in next_layer.iter_mut() {
+      *item = hyperbolic_tangent (*item);
+    }
     result.layers.push (next_layer);
   }
   result
@@ -60,6 +55,19 @@ pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInp
   output [0]
 }
 
+thread_local! {
+  pub static INPUTS: HashMap <String, usize> = {
+    let mut result = HashMap::new();
+    result.insert ("turn_started".to_string(), 4);
+    result.insert ("unit_added".to_string(), UNIT_SIZE);
+    result.insert ("unit_removed".to_string(), UNIT_SIZE);
+    
+    result.insert ("move".to_string(), LOCATION_SIZE + UNIT_SIZE);
+    result.insert ("attack".to_string(), LOCATION_SIZE*2 + UNIT_SIZE*2 + 8);
+    result.insert ("recruit".to_string(), UNIT_SIZE);
+    result
+  }
+}
 
 pub fn neural_bool (value: bool)->f64 {if value {1.0} else {0.0}}
 
