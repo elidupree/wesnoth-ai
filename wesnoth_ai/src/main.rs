@@ -390,6 +390,8 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
       unit.side = state.current_side;
       unit.x = dst_x;
       unit.y = dst_y;
+      unit.moves = 0;
+      unit.attacks_left = 0;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: represent_unit (state, &unit)});
       state.get_mut (dst_x, dst_y).unit = Some (unit);
       invalidate_moves (state, [dst_x, dst_y], 0);
@@ -408,6 +410,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
             let healing = if unit.poisoned && terrain_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
             unit.resting = true;
             unit.moves = unit.max_moves;
+            unit.attacks_left = 1;
             if healing > 0 && unit.hitpoints < unit.max_hitpoints {
               unit.hitpoints = ::std::cmp::min (unit.max_hitpoints, unit.hitpoints + healing);
             }
@@ -713,6 +716,8 @@ struct WesnothMap {
     leader.x = map.starting_locations [index][0];
     leader.y = map.starting_locations [index][1];
     leader.side = index;
+    leader.moves = leader.max_moves;
+    leader.attacks_left = 1;
     let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;
     locations [location_index].unit = Some (leader);
     let mut enemies = HashSet::new(); enemies.insert ((index + 1) % 2);
