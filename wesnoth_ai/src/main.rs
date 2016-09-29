@@ -89,6 +89,29 @@ fn random_organism (layer_sizes: Vec<usize>)->Organism {
   result
 }
 
+use rand::distributions::exponential::Exp1;
+fn mutated_organism (original: & Organism)->Organism {
+  let Exp1(mutation_rate) = random();
+  let Exp1(mutation_size) = random();
+  let mut result = original.clone();
+  for weights in result.weights_by_input.iter_mut() {
+    for something in weights.1.iter_mut() {
+      mutate_vector (&mut something.hidden_matrix.weights, mutation_rate, mutation_size);
+      mutate_vector (&mut something.input_matrix.weights, mutation_rate, mutation_size);
+      mutate_vector (&mut something.bias, mutation_rate, mutation_size);
+    }
+  }
+  mutate_vector (&mut result.output_weights.weights, mutation_rate, mutation_size);
+  result
+}
+fn mutate_vector (vector: &mut Vec<f32>, mutation_rate: f64, mutation_size: f64) {
+  for value in vector.iter_mut() {
+    if mutation_rate > random::<f64>()*100.0 {
+      *value += ((random::<f64>() *2.0f64 - 1.0f64) * mutation_size*0.2f64) as f32;
+    }
+  }
+}
+
 #[derive (Clone, Serialize, Deserialize, Debug)]
 struct Memory {
   layers: Vec<Vec<f32>>,
@@ -774,8 +797,16 @@ fn main() {
   fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
   let mut organisms = Vec::new();
   for iteration in 0..100 {
+    let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
       organisms.push (random_organism_default());
+      if was_empty || random::<f32> () <0.2 {
+        organisms.push (random_organism_default());
+      }
+      else {
+        let new_organism = Arc::new (mutated_organism (&organisms [0].0));
+        organisms.push ((new_organism, Stats {rating: 0.0}));
+      }
     }
     for index in 0..(organisms.len()-1) {
       if organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
