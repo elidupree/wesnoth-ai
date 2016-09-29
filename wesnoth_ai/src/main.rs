@@ -5,6 +5,13 @@ extern crate serde;
 extern crate serde_json;
 extern crate rand;
 
+macro_rules! printlnerr(
+    ($($arg:tt)*) => { {use std::io::Write;
+        let r = writeln!(&mut ::std::io::stderr(), $($arg)*);
+        r.expect("failed printing to stderr");
+    } }
+);
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{Rng, random};
@@ -370,6 +377,7 @@ fn apply_wesnoth_move (state: &mut WesnothState, input: & WesnothMove)->Vec<Neur
         assert! (remaining_leaders.len() >0);
         // TODO: allow allies and stuff
         if remaining_leaders.len() == 1 {
+          printlnerr!("Victory...");
           state.scores = Some (vec![-1.0; state.sides.len()]);
           state.scores.as_mut().unwrap()[remaining_leaders [0].side] = 1.0;
         }
@@ -728,7 +736,7 @@ struct WesnothMap {
   }
 }
 fn compete (map: Arc <WesnothMap>, players: Vec<Arc <Organism>>)->Vec<f32> {
-  println!("Beginning competition...");
+  printlnerr!("Beginning competition...");
   let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
   while state.scores.is_none() {
@@ -736,7 +744,7 @@ fn compete (map: Arc <WesnothMap>, players: Vec<Arc <Organism>>)->Vec<f32> {
     apply_wesnoth_move (&mut state, &choice);
   }
   let duration = start.elapsed();
-  println!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
+  printlnerr!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
   state.scores.unwrap()
 }
 //fn play_game (player: & Organism, map: & WesnothMap)->Replay {
