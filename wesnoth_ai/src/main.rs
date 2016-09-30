@@ -225,7 +225,11 @@ fn main() {
   struct Stats {
     rating: f64,
   }
-  fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
+  fn random_organism_default()->(Arc<Organism>, Stats) {
+    let layers = rand::thread_rng().gen_range (1, 4);
+    let organism = random_organism (vec![150/layers; layers]);
+    (Arc::new (organism), Stats {rating: 0.0})
+  }
   let mut organisms = Vec::new();
   for _ in 0..1000 {
     let was_empty = organisms.is_empty();
