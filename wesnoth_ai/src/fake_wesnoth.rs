@@ -219,6 +219,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
           
         }
       }
+      results.push (NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
       for index in added_units {
         let unit = state.locations[index].unit.as_ref().unwrap();
         results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
@@ -230,7 +231,6 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       for location in state.locations.iter_mut() {
         location.unit_moves = None;
       }
-      results.push (NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
     },
   }
   
