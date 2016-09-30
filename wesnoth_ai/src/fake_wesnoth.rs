@@ -131,7 +131,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       unit.resting = false;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
       if state.map.config.terrain_info.get (&state.get (dst_x, dst_y).terrain).unwrap().village {
-        state.get_mut (dst_x, dst_y).village_owner = unit.side;
+        state.get_mut (dst_x, dst_y).village_owner = unit.side + 1;
       }
       state.get_mut (dst_x, dst_y).unit = Some (unit);
       invalidate_moves (state, [src_x, src_y], 0);
@@ -201,6 +201,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
         state.turn += 1;
         state.current_side = 0;
       }
+      state.sides [state.current_side].gold += total_income (state, state.current_side);
       let mut added_units = Vec::new();
       for (index, location) in state.locations.iter_mut().enumerate() {
         if let Some (unit) = location.unit.as_mut() {
@@ -428,7 +429,7 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
           if remaining >0 {
             let stuff = state.get (location [0], location [1]);
             let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
-            if info.village && stuff.village_owner != unit.side {
+            if info.village && stuff.village_owner != unit.side + 1 {
               remaining = 0;
             }
             for double_adjacent in adjacent_locations (& state.map, adjacent) {
@@ -445,4 +446,20 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
     }
   }
   results
+}
+
+pub fn total_income (state: & State, side: usize)->i32 {
+  let mut villages = 0;
+  let mut upkeep = 0;
+  for location in state.locations.iter() {
+    if state.map.config.terrain_info.get (&location.terrain).unwrap().village && location.village_owner == side + 1 {
+      villages += 1;
+    }
+    if let Some (unit) = location.unit.as_ref() {
+      if unit.side == side && unit.canrecruit == false {
+        upkeep += unit.level;
+      }
+    }
+  }
+  villages*2 - ::std::cmp::max (0, upkeep - villages)
 }
