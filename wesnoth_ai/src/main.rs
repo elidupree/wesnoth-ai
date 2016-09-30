@@ -198,48 +198,53 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
   state
 }
 fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64> {
-  printlnerr!("Beginning competition...");
-  let start = ::std::time::Instant::now();
+  //printlnerr!("Beginning competition...");
+  //let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
   while state.scores.is_none() {
     let choice = choose_move (&mut state);
     fake_wesnoth::apply_move (&mut state, &choice);
   }
-  let duration = start.elapsed();
-  printlnerr!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
+  //let duration = start.elapsed();
+  //printlnerr!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
   state.scores.unwrap()
 }
 //fn play_game (player: & Organism, map: & fake_wesnoth::Map)->Replay {
   //
 //}
 
-use std::fs::File;
-use std::io::Read;
-fn main() {
-  let mut f = File::open("tiny_close_relation_default.json").unwrap();
-  let mut s = String::new();
-  f.read_to_string(&mut s).unwrap();
-  let tiny_close_relation_data: Arc<fake_wesnoth::Map> = serde_json::from_str(&s).unwrap();
-  let map = tiny_close_relation_data;
-  
+fn random_organism_default()->Arc<Organism> {
+  let layers = rand::thread_rng().gen_range (1, 4);
+  let organism = random_organism (vec![((40000/layers) as f64).sqrt() as usize; layers]);
+  Arc::new (organism)
+}
+fn random_mutant_default(organism: & Organism)->Arc<Organism> {
+  if random::<f64> () <0.2 {
+    random_organism_default()
+  }
+  else {
+    Arc::new (mutated_organism (organism))
+  }
+}
+
+fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   struct Stats {
     rating: f64,
   }
-  fn random_organism_default()->(Arc<Organism>, Stats) {
-    let layers = rand::thread_rng().gen_range (1, 4);
-    let organism = random_organism (vec![((40000/layers) as f64).sqrt() as usize; layers]);
-    (Arc::new (organism), Stats {rating: 0.0})
-  }
+
   let mut organisms = Vec::new();
-  for _ in 0..1000 {
+  let start = ::std::time::Instant::now();
+  let mut iteration = 0;
+  while start.elapsed().as_secs() < 20 {
+    iteration += 1;
     let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
-      organisms.push (random_organism_default());
-      if was_empty || random::<f64> () <0.2 {
-        organisms.push (random_organism_default());
+      organisms.push ((random_organism_default(), Stats {rating: 0.0}));
+      if was_empty {
+        organisms.push ((random_organism_default(), Stats {rating: 0.0}));
       }
       else {
-        let new_organism = Arc::new (mutated_organism (&organisms [0].0));
+        let new_organism = random_mutant_default(&organisms [0].0);
         organisms.push ((new_organism, Stats {rating: 0.0}));
       }
     }
@@ -254,7 +259,86 @@ fn main() {
     organisms.sort_by (|a, b| b.1.rating.partial_cmp(&a.1.rating).unwrap());
     organisms.retain (| &(_, Stats {ref rating})| *rating >= 0.0);
   }
-  
+  printlnerr!("Original training completed {} iterations ", iteration);
+  organisms [0].0.clone()
+}
+
+use std::thread;
+use std::sync::mpsc::channel;
+
+fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+  let mut champion = random_organism_default();
+  let start = ::std::time::Instant::now();
+  let mut games = 0;
+  while start.elapsed().as_secs() < 20 {
+    let (send, receive) = channel();
+    let (count_send, count_receive) = channel();
+    for _ in 0..3 {
+      let send = send.clone();
+      let count_send = count_send.clone();
+      let champion = champion.clone();
+      let map = map.clone();
+      thread::spawn (move | | {
+        loop {
+          let challenger = random_mutant_default (&champion);
+          let results = compete (map.clone(), vec![champion.clone(), challenger.clone()]);
+          if results [1] > 0.0 {
+            let _ = send.send(challenger);
+            return;
+          }
+          if let Err (_) = count_send.send (()) {return;}
+        }
+      });
+    }
+    loop {
+      count_receive.recv().unwrap();
+      games += 1;
+      if let Ok (new_champion) = receive.try_recv() {
+        champion = new_champion;
+        break;
+      }
+    }
+  }
+  printlnerr!("Champion training used {} games ", games);
+  champion
+}
+
+
+
+
+fn tournament (map: Arc <fake_wesnoth::Map>, organisms: Vec<(Arc <Organism>, & 'static str)>)->Arc <Organism> {
+  let mut total_scores = vec![0.0; organisms.len()];
+  for (first_index, first) in organisms.iter().enumerate() {
+    for (second_index, second) in organisms.iter().enumerate() {
+      if first_index != second_index {
+        for _ in 0..10 {
+          let results = compete (map.clone(), vec![first.0.clone(), second.0.clone()]);
+          total_scores [first_index] += results [0];
+          total_scores [second_index] += results [1];
+        }
+      }
+    }
+  }
+  printlnerr!("Tournament scores:");
+  let mut best_index = 0;
+  for (index, stuff) in organisms.iter().enumerate() {
+    printlnerr!("{}: {}", stuff.1, total_scores [index]);
+    if total_scores [index] > total_scores [best_index] {
+      best_index = index;
+    }
+  }
+  organisms [best_index].0.clone()
+}
+
+use std::fs::File;
+use std::io::Read;
+fn main() {
+  let mut f = File::open("tiny_close_relation_default.json").unwrap();
+  let mut s = String::new();
+  f.read_to_string(&mut s).unwrap();
+  let tiny_close_relation_data: Arc<fake_wesnoth::Map> = serde_json::from_str(&s).unwrap();
+  let map = tiny_close_relation_data;
+    
   fn do_test <Input: Serialize, Output: Serialize, Function: Fn (Input)->Output> (input: Input, function_name: &str, function: Function) {
     println!( "{{
       tested_function = [=[{}]=],
@@ -262,9 +346,14 @@ fn main() {
       output = [=[{}]=]}},", function_name, serde_json::to_string (& input).unwrap(), serde_json::to_string (& function (input)).unwrap());
   }
   
+  let winner = tournament (map.clone(), vec![
+    (original_training (map.clone()), "original"),
+    (first_to_beat_the_champion_training (map.clone()), "first_to_beat_the_champion_training"),
+  ]);
+  
   println!("return {{
     organism = [============================[{}]============================],
-    tests = {{", serde_json::to_string (& organisms [0].0).unwrap());
+    tests = {{", serde_json::to_string (& winner).unwrap());
   
   for _ in 0..20 {
     do_test (random::<f64>()*50.0 - 25.0, "hyperbolic_tangent", hyperbolic_tangent);
