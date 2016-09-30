@@ -237,7 +237,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
   for side in state.sides.iter_mut() {
     for input in results.iter() {
       side.memory = next_memory (& side.player, & side.memory, input);
-      printlnerr!("Processed {:?}", input);
+      //printlnerr!("Processed {:?}", input);
     }
   }
   

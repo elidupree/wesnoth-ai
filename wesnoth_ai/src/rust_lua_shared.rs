@@ -47,7 +47,7 @@ pub fn initial_memory (organism: & Organism)->Memory {
 }
 
 pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)->f64 {
-  printlnerr!("Evaluating {:?}", input);
+  //printlnerr!("Evaluating {:?}", input);
   if input.input_type == "end_turn" {return 0.0;}
   let mut output = vec![0.0];
   multiply_into (&next_memory (organism, memory, input).layers.last().unwrap(), &mut output, & organism.output_weights);
