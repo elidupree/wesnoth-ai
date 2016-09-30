@@ -130,6 +130,9 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       unit.moves = moves_left;
       unit.resting = false;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
+      if state.map.config.terrain_info.get (&state.get (dst_x, dst_y).terrain).unwrap().village {
+        state.get_mut (dst_x, dst_y).village_owner = unit.side;
+      }
       state.get_mut (dst_x, dst_y).unit = Some (unit);
       invalidate_moves (state, [src_x, src_y], 0);
       invalidate_moves (state, [dst_x, dst_y], 0);
@@ -423,7 +426,12 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
         let mut remaining = moves_left - unit.movement_costs.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap();
         if remaining >= 0 {
           if remaining >0 {
-           for double_adjacent in adjacent_locations (& state.map, adjacent) {
+            let stuff = state.get (location [0], location [1]);
+            let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
+            if info.village && stuff.village_owner != unit.side {
+              remaining = 0;
+            }
+            for double_adjacent in adjacent_locations (& state.map, adjacent) {
               if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
                 break;
