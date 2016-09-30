@@ -192,6 +192,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       unit.moves = 0;
       unit.attacks_left = 0;
       results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
+      state.sides [state.current_side].gold -= unit.cost;
       state.get_mut (dst_x, dst_y).unit = Some (unit);
       invalidate_moves (state, [dst_x, dst_y], 0);
     },
@@ -241,7 +242,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
   for side in state.sides.iter_mut() {
     for input in results.iter() {
       side.memory = next_memory (& side.player, & side.memory, input);
-      //printlnerr!("Processed {:?}", input);
+      printlnerr!("Processed {:?}", input);
     }
   }
   
@@ -268,7 +269,7 @@ pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Uni
 
 // TODO: remove duplicate code between this and simulate_combat
 pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
-  
+  #[derive (Debug)]
   struct Combatant {
     unit: Box <Unit>,
     swings_left: i32,
@@ -307,6 +308,7 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
       if !swing (&mut dc, &mut ac) { break; }
     }
   }
+  //printlnerr!("{:?}, {:?}, {:?}, {:?}, ", attacker, defender, ac, dc);
   
   (
     if ac.unit.hitpoints >0 {Some (ac.unit)} else {None},
@@ -314,16 +316,18 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
   )
 }
 
-#[derive (Clone, PartialEq, Eq, Hash)]
+#[derive (Clone, PartialEq, Eq, Hash, Debug)]
 pub struct CombatantState {
   pub hitpoints: i32,
   // TODO: slow, etc.
 }
+#[derive (Clone, Debug)]
 pub struct CombatStats {
   pub possibilities: HashMap<CombatantState, f64>,
 }
 // TODO: remove duplicate code between this and combat_results
 pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(CombatStats, CombatStats) {
+  #[derive (Debug)]
   struct Combatant {
     stats: CombatStats,
     swings_left: i32,
@@ -372,6 +376,7 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
       swing (&mut dc, &mut ac);
     }
   }
+  //printlnerr!("{:?}, {:?}, {:?}, {:?}, ", attacker, defender, ac, dc);
   
   (
     ac.stats,
