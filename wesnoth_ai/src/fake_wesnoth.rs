@@ -135,7 +135,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       invalidate_moves (state, [dst_x, dst_y], 0);
     },
     &Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
-      printlnerr!("Attack: {:?}", input);
+      //printlnerr!("Attack: {:?}", input);
       if src_x != dst_x || src_y != dst_y {
         results.extend (apply_move (state, &Move::Move {
           src_x: src_x, src_y: src_y, dst_x: dst_x, dst_y: dst_y, moves_left: 0
@@ -237,6 +237,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
   for side in state.sides.iter_mut() {
     for input in results.iter() {
       side.memory = next_memory (& side.player, & side.memory, input);
+      printlnerr!("Processed {:?}", input);
     }
   }
   
