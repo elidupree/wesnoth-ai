@@ -186,7 +186,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
     current_side: 0,
     locations: locations,
     sides: sides,
-    time_of_day: 0,
+    time_of_day: rand::thread_rng().gen_range (0, 6),
     turn: 1,
     max_turns: 30,
     scores: None,

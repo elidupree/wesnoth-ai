@@ -201,6 +201,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       if state.current_side >= state.sides.len() {
         state.turn += 1;
         state.current_side = 0;
+        state.time_of_day = (state.time_of_day + 1) % 6;
       }
       state.sides [state.current_side].gold += total_income (state, state.current_side);
       let mut added_units = Vec::new();
@@ -267,6 +268,15 @@ pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Uni
   best_index
 }
 
+pub fn lawful_bonus (state: & State)->i32 {
+  if state.time_of_day == 1 || state.time_of_day == 2 { 25 }
+  else if state.time_of_day == 4 || state.time_of_day == 5 { 25 }
+  else { 0 }
+}
+pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
+  100 + unit.alignment*lawful_bonus (state)
+}
+
 // TODO: remove duplicate code between this and simulate_combat
 pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
   #[derive (Debug)]
@@ -281,7 +291,7 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
       unit: Box::new (unit.clone()),
       swings_left: attack.map_or (0, | attack | attack.number),
       // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100) / 100),
+      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
       chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
     }
   };
@@ -339,7 +349,7 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
       stats: CombatStats {possibilities: ::std::iter::once ((CombatantState {hitpoints: unit.hitpoints}, 1.0)).collect()},
       swings_left: attack.map_or (0, | attack | attack.number),
       // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100) / 100),
+      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
       chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
     }
   };
