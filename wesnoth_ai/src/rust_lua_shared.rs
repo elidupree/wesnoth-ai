@@ -1,6 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use rand::{Rng, random};
 
 use fake_wesnoth;
 use super::*;
@@ -119,13 +117,23 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
       vector: neural_location (state, dst_x, dst_y).into_iter().chain(neural_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap())).collect()
     },
     &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+      let mut attacker = state.get (src_x, src_y).unit.clone().unwrap();
+      attacker.x = src_x;
+      attacker.y = src_y;
+      let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
+      let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, usize::max_value() - 1);
       NeuralInput {
         input_type: "attack".to_string(),
-        vector: neural_location (state, dst_x, dst_y).into_iter()
+        vector: 
+          vec![
+            stats.0.death_chance, stats.1.death_chance,
+            attacker.hitpoints as f64 - stats.0.average_hitpoints, defender.hitpoints as f64 - stats.1.average_hitpoints,
+            0.0, 0.0, 0.0, 0.0
+          ].into_iter()
+          .chain(neural_location (state, dst_x, dst_y))
           .chain(neural_location (state, attack_x, attack_y))
           .chain(neural_unit (state, &state.get (src_x, src_y).unit.as_ref().unwrap()))
           .chain(neural_unit (state, &state.get (attack_x, attack_y).unit.as_ref().unwrap()))
-          .chain (vec![0.2, 0.2, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0])
           .collect()
       }
 
@@ -238,7 +246,7 @@ pub fn collect_moves (state: &mut fake_wesnoth::State)->Vec<(fake_wesnoth::Move,
   calculate_moves (state);
   
   let mut results = vec![(fake_wesnoth::Move::EndTurn, 0.0)];
-  for (index, location) in state.locations.iter().enumerate() {
+  for location in state.locations.iter() {
     if let Some (moves) = location.unit_moves.as_ref() {
       results.extend (moves.into_iter().cloned());
     }

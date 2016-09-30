@@ -18,7 +18,6 @@ use rand::{Rng, random};
 use serde::Serialize;
 
 mod fake_wesnoth;
-use fake_wesnoth::{Map as WesnothMap, State as WesnothState};
 mod rust_lua_shared;
 use rust_lua_shared::*;
 
@@ -228,7 +227,7 @@ fn main() {
   }
   fn random_organism_default()->(Arc<Organism>, Stats) {(Arc::new (random_organism (vec![50, 50, 50])), Stats {rating: 0.0})}
   let mut organisms = Vec::new();
-  for iteration in 0..1000 {
+  for _ in 0..1000 {
     let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
       organisms.push (random_organism_default());

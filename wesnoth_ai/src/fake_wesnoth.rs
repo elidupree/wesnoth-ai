@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use rand::{self, Rng, random};
+use rand::{self, Rng};
 use super::*;
 use super::rust_lua_shared::*;
 
@@ -142,7 +142,7 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
         }));
       }
       let mut attacker = state.get_mut (dst_x, dst_y).unit.take().unwrap();
-      let mut defender = state.get_mut (attack_x, attack_y).unit.take().unwrap();
+      let defender = state.get_mut (attack_x, attack_y).unit.take().unwrap();
       attacker.moves = 0;
       attacker.attacks_left -= 1;
       let (new_attacker, new_defender) = combat_results (state, &attacker, &defender, weapon);
@@ -243,6 +243,25 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
   results
 }
 
+pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->usize {
+  let attacker_attack = &attacker.attacks [weapon];
+  // pretty similar rules to Wesnoth, but is not important to get them exactly the same.
+  let mut best_index = usize::max_value();
+  let mut best_score = -100000000000.0;
+  for (index, attack) in defender.attacks.iter().enumerate() {
+    if attack.range == attacker_attack.range {
+      let stats = simulate_and_analyze (state, attacker, defender, weapon, index);
+      let score = ((stats.0.death_chance - stats.1.death_chance) *100000.0) +(attacker.hitpoints as f64 - stats.0.average_hitpoints) - (defender.hitpoints as f64 - stats.1.average_hitpoints);
+      if score >best_score {
+        best_score = score;
+        best_index = index;
+      }
+    }
+  }
+  best_index
+}
+
+// TODO: remove duplicate code between this and simulate_combat
 pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
   
   struct Combatant {
@@ -270,7 +289,7 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
   
   let attacker_attack = &attacker.attacks [weapon];
   // TODO: actual selection of best defender attack
-  let defender_attack = defender.attacks.iter().find(| attack | attack.range == attacker_attack.range);
+  let defender_attack = defender.attacks.get (choose_defender_weapon (state, attacker, defender, weapon));
   
   let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
   let mut dc = make_combatant (defender, defender_attack, attacker);
@@ -288,6 +307,90 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
     if ac.unit.hitpoints >0 {Some (ac.unit)} else {None},
     if dc.unit.hitpoints >0 {Some (dc.unit)} else {None},
   )
+}
+
+#[derive (Clone, PartialEq, Eq, Hash)]
+pub struct CombatantState {
+  pub hitpoints: i32,
+  // TODO: slow, etc.
+}
+pub struct CombatStats {
+  pub possibilities: HashMap<CombatantState, f64>,
+}
+// TODO: remove duplicate code between this and combat_results
+pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(CombatStats, CombatStats) {
+  struct Combatant {
+    stats: CombatStats,
+    swings_left: i32,
+    damage: i32,
+    chance: i32,
+  }
+  let make_combatant = |unit: &Unit, attack: Option <& Attack>, other: & Unit|->Combatant {
+    Combatant {
+      stats: CombatStats {possibilities: ::std::iter::once ((CombatantState {hitpoints: unit.hitpoints}, 1.0)).collect()},
+      swings_left: attack.map_or (0, | attack | attack.number),
+      // TODO: correct rounding direction
+      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100) / 100),
+      chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
+    }
+  };
+  
+  fn swing (swinger: &mut Combatant, victim: &mut Combatant) {
+    swinger.swings_left -= 1;
+    
+    for (possibility, chance) in ::std::mem::replace (&mut victim.stats.possibilities, HashMap::new()) {
+      if possibility.hitpoints <= 0 {
+        (*victim.stats.possibilities.entry (possibility).or_insert (0.0)) += chance;
+      }
+      else {
+        let mut hit_possibility = possibility.clone();
+        hit_possibility.hitpoints -= swinger.damage;
+        if hit_possibility.hitpoints < 0 {hit_possibility.hitpoints = 0;}
+        (*victim.stats.possibilities.entry (possibility).or_insert (0.0)) += chance*((100 - swinger.chance) as f64/100.0);
+        (*victim.stats.possibilities.entry (hit_possibility).or_insert (0.0)) += chance*(swinger.chance as f64/100.0);
+      }
+    }
+  }
+  
+  let attacker_attack = &attacker.attacks [attacker_weapon];
+  let defender_weapon = if defender_weapon == usize::max_value() - 1 { choose_defender_weapon (state, attacker, defender, attacker_weapon) } else {defender_weapon};
+  let defender_attack = defender.attacks.get (defender_weapon);
+  
+  let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
+  let mut dc = make_combatant (defender, defender_attack, attacker);
+  
+  while ac.swings_left > 0 || dc.swings_left > 0 {
+    if ac.swings_left > 0 {
+      swing (&mut ac, &mut dc);
+    }
+    if dc.swings_left > 0 {
+      swing (&mut dc, &mut ac);
+    }
+  }
+  
+  (
+    ac.stats,
+    dc.stats,
+  )
+}
+pub struct AnalyzedStats {
+  pub average_hitpoints: f64,
+  pub death_chance: f64,
+}
+pub fn analyze_stats (stats: &CombatStats)->AnalyzedStats {
+  let mut result = AnalyzedStats {
+    average_hitpoints: 0.0,
+    death_chance: 0.0,
+  };
+  for (possibility, chance) in stats.possibilities.iter() {
+    result.average_hitpoints += possibility.hitpoints as f64*chance;
+    if possibility.hitpoints <= 0 {result.death_chance += *chance;}
+  }
+  result
+}
+pub fn simulate_and_analyze (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(AnalyzedStats, AnalyzedStats) {
+  let stats = simulate_combat (state, attacker, defender, attacker_weapon, defender_weapon);
+  (analyze_stats (&stats.0), analyze_stats (&stats.1))
 }
 
 pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->Vec<[i32; 2]> {
