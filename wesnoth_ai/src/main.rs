@@ -263,7 +263,7 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   organisms [0].0.clone()
 }
 
-use std::thread;
+use std::{thread,time};
 use std::sync::mpsc::channel;
 
 fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
@@ -290,13 +290,15 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
         }
       });
     }
-    loop {
-      count_receive.recv().unwrap();
-      games += 1;
+    while start.elapsed().as_secs() < 20 {
+      if let Ok (_) = count_receive.try_recv() {
+        games += 1;
+      }
       if let Ok (new_champion) = receive.try_recv() {
         champion = new_champion;
         break;
       }
+      thread::sleep(time::Duration::from_millis(1));
     }
   }
   printlnerr!("Champion training used {} games ", games);
