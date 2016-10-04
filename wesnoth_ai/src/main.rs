@@ -412,6 +412,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       }
       while let Some (game) = game_results.try_pop() {
         games += 1;
+        games_planned -= 1;
         for member in game.into_iter() {
           if let Some (lineage) = lineages.iter_mut().find (| lineage | lineage .id == member.lineage_id){
             if let Some (index) = lineage.members.iter().position (| lineage | lineage .id == member.lineage_id) {
