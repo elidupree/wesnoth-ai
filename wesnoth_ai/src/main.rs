@@ -4,6 +4,7 @@
 extern crate serde;
 extern crate serde_json;
 extern crate rand;
+extern crate crossbeam;
 
 macro_rules! printlnerr(
     ($($arg:tt)*) => { {use std::io::Write;
@@ -265,6 +266,7 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
 
 use std::{thread,time};
 use std::sync::mpsc::channel;
+use crossbeam::sync::{MsQueue as Exchange};
 
 fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   let mut champion = random_organism_default();
@@ -304,6 +306,123 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
   printlnerr!("Champion training used {} games ", games);
   champion
 }
+
+
+
+fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+  struct Lineage {
+    id: usize,
+    members: Vec<Member>,
+  }
+  #[derive (Clone)]
+  struct Member {
+    organism: Arc <Organism>,
+    id: usize,
+    parent_rank: i32,
+    rank: i32,
+    games: i32,
+    lineage_id: usize,
+  }
+  let needed_games = Exchange::<Option <Vec<Member>>>::new();
+  let game_results = Exchange::new();
+  
+  crossbeam::scope (| scope | {
+    let mut lineages = Vec::<Lineage>::new();
+    let mut next_id = 0;
+    let start = ::std::time::Instant::now();
+    let mut games = 0;
+
+    for _ in 0..3 {
+      let needed_games = & needed_games;
+      let game_results = & game_results;
+      let map = & map;
+      scope.spawn (move || {
+        while let Some (mut game) = needed_games.pop() {
+          let results = compete (map.clone(), vec![game [0].organism.clone(), game [1].organism.clone()]);
+          game [0].rank += results [0] as i32;
+          game [1].rank += results [1] as i32;
+          game_results.push (game);
+        }
+      });
+    }
+    let mut games_planned = 0;
+    while start.elapsed().as_secs() < 20 {
+      //lineages.retain (| lineage | !lineage.members.is_empty());
+      while lineages.len() < 3 {
+        lineages.push (Lineage {
+          id: next_id,
+          members: vec![Member {
+            organism: random_organism_default(),
+            id: next_id + 1,
+            parent_rank: 0, rank: 0, games: 0, lineage_id: next_id}]
+        });
+        next_id += 2;
+      }
+      for lineage in lineages.iter_mut() {
+        lineage.members.sort_by_key (| member | -member.rank);
+        while lineage.members.len() < 4 {
+          if lineage.members.is_empty() {
+            lineage.members.push (Member {
+              organism: random_organism_default(),
+              id: next_id + 1,
+                          parent_rank: 0, rank: 0, games: 0, lineage_id: lineage .id
+            });
+          }
+          else {
+            let new_member = Member {
+              organism: random_mutant_default(&lineage.members [0].organism),
+              id: next_id + 1,
+                        parent_rank: lineage.members [0].rank, rank: lineage.members [0].rank, games: 0, lineage_id: lineage .id
+            }
+            ;
+            lineage.members.push (new_member,
+            );
+          }
+          next_id += 1;
+        }
+      }
+      lineages.sort_by_key (| lineage | -lineage.members[0].rank);
+      while games_planned < 5 {
+        let lineages = (
+          rand::thread_rng().choose (&lineages).unwrap(),
+          rand::thread_rng().choose (&lineages).unwrap());
+        if lineages.0 .id != lineages.1 .id && !lineages.0.members.is_empty() && !lineages.1.members.is_empty() {
+          let indices = (
+            rand::thread_rng().gen_range (0, lineages.0.members.len()),
+            rand::thread_rng().gen_range (0, lineages.1.members.len()),
+          );
+          let competitors = vec![
+            lineages.0.members [indices.0].clone(),
+            lineages.1.members [indices.1].clone(),
+          ];
+          if (competitors[0].rank - competitors[1].rank).abs() <= 5 {
+            games_planned += 1;
+            needed_games.push (Some (competitors));
+          }
+        }
+      }
+      while let Some (game) = game_results.try_pop() {
+        games += 1;
+        for member in game.into_iter() {
+          if let Some (lineage) = lineages.iter_mut().find (| lineage | lineage .id == member.lineage_id){
+            if let Some (index) = lineage.members.iter().position (| lineage | lineage .id == member.lineage_id) {
+              if member.rank >= member.parent_rank || member.games >= (1 << (member.parent_rank - member.rank)) {
+                lineage.members [index] = member;
+              }
+              else {
+                lineage.members.remove (index);
+              }
+            }
+          }
+        }
+      }
+    }
+    for _ in 0..3 {needed_games.push (None);}
+    printlnerr!("Lineages training used {} games ", games);
+    lineages [0].members [0].organism.clone()
+  })
+}
+
 
 
 
@@ -351,6 +470,7 @@ fn main() {
   let winner = tournament (map.clone(), vec![
     (original_training (map.clone()), "original"),
     (first_to_beat_the_champion_training (map.clone()), "first_to_beat_the_champion_training"),
+    (ranked_lineages_training(map.clone()), "ranked_lineages_training"),
   ]);
   
   println!("return {{
