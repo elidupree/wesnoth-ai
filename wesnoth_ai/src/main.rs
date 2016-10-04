@@ -366,6 +366,9 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       }
       for lineage in lineages.iter_mut() {
         lineage.members.sort_by_key (| member | -member.rank);
+        if lineage.members[0].rank >lineage.members [lineage.members.len() - 1].rank + 4 {
+          lineage.members.pop();
+        }
         while lineage.members.len() < 4 {
           if lineage.members.is_empty() {
             lineage.members.push (Member {
