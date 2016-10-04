@@ -309,7 +309,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
       thread::sleep(time::Duration::from_millis(1));
     }
   }
-  printlnerr!("Champion training used {} games ", games);
+  printlnerr!("Champion training used {} games, with {} turnovers", games, turnovers);
   champion
 }
 
@@ -479,7 +479,8 @@ fn main() {
   }
   
   let winner = tournament (map.clone(), vec![
-    (original_training (map.clone()), "original"),
+    (random_organism_default(), "no training"),
+    (original_training (map.clone()), "original_training"),
     (first_to_beat_the_champion_training (map.clone()), "first_to_beat_the_champion_training"),
     (ranked_lineages_training(map.clone()), "ranked_lineages_training"),
   ]);
