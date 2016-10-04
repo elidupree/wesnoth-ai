@@ -214,6 +214,7 @@ fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64
   //
 //}
 
+const TRAINING_TIME: u64 = 230;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
   let organism = random_organism (vec![((40000/layers) as f64).sqrt() as usize; layers]);
@@ -236,7 +237,7 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   let mut organisms = Vec::new();
   let start = ::std::time::Instant::now();
   let mut iteration = 0;
-  while start.elapsed().as_secs() < 20 {
+  while start.elapsed().as_secs() < TRAINING_TIME {
     iteration += 1;
     let was_empty = organisms.is_empty();
     while organisms.len() < 10 {
@@ -273,7 +274,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
   let mut turnovers = 0;
   let start = ::std::time::Instant::now();
   let mut games = 0;
-  while start.elapsed().as_secs() < 20 {
+  while start.elapsed().as_secs() < TRAINING_TIME {
     let wins_needed = ((turnovers + 2) as f64).log2() as i32;
     let (send, receive) = channel();
     let (count_send, count_receive) = channel();
@@ -297,7 +298,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
         }
       });
     }
-    while start.elapsed().as_secs() < 20 {
+    while start.elapsed().as_secs() < TRAINING_TIME {
       if let Ok (_) = count_receive.try_recv() {
         games += 1;
       }
@@ -352,7 +353,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       });
     }
     let mut games_planned = 0;
-    while start.elapsed().as_secs() < 20 {
+    while start.elapsed().as_secs() < TRAINING_TIME {
       //lineages.retain (| lineage | !lineage.members.is_empty());
       while lineages.len() < 3 {
         lineages.push (Lineage {
