@@ -270,9 +270,11 @@ use crossbeam::sync::{MsQueue as Exchange};
 
 fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   let mut champion = random_organism_default();
+  let mut turnovers = 0;
   let start = ::std::time::Instant::now();
   let mut games = 0;
   while start.elapsed().as_secs() < 20 {
+    let wins_needed = ((turnovers + 2) as f64).log2() as i32;
     let (send, receive) = channel();
     let (count_send, count_receive) = channel();
     for _ in 0..3 {
@@ -281,14 +283,17 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
       let champion = champion.clone();
       let map = map.clone();
       thread::spawn (move | | {
-        loop {
+        'a: loop {
           let challenger = random_mutant_default (&champion);
-          let results = compete (map.clone(), vec![champion.clone(), challenger.clone()]);
-          if results [1] > 0.0 {
-            let _ = send.send(challenger);
-            return;
+          for _ in 0..wins_needed { 
+            let results = compete (map.clone(), vec![champion.clone(), challenger.clone()]);
+            if results [1] <= 0.0 {
+              continue 'a;
+            }
+            if let Err (_) = count_send.send (()) {return;}
           }
-          if let Err (_) = count_send.send (()) {return;}
+          let _ = send.send(challenger);
+          return;
         }
       });
     }
@@ -298,6 +303,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
       }
       if let Ok (new_champion) = receive.try_recv() {
         champion = new_champion;
+        turnovers += 1;
         break;
       }
       thread::sleep(time::Duration::from_millis(1));
@@ -416,6 +422,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
           }
         }
       }
+      thread::sleep(time::Duration::from_millis(1));
     }
     for _ in 0..3 {needed_games.push (None);}
     printlnerr!("Lineages training used {} games ", games);
