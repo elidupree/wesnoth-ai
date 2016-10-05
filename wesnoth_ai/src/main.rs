@@ -189,7 +189,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
     sides: sides,
     time_of_day: rand::thread_rng().gen_range (0, 6),
     turn: 1,
-    max_turns: 30,
+    max_turns: 10,
     scores: None,
   };
   let input = neural_turn_started (&state);
@@ -214,10 +214,10 @@ fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64
   //
 //}
 
-const TRAINING_TIME: u64 = 230;
+const TRAINING_TIME: u64 = 30;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
-  let organism = random_organism (vec![((40000/layers) as f64).sqrt() as usize; layers]);
+  let organism = random_organism (vec![((122500/layers) as f64).sqrt() as usize; layers]);
   Arc::new (organism)
 }
 fn random_mutant_default(organism: & Organism)->Arc<Organism> {
@@ -288,10 +288,10 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
           let challenger = random_mutant_default (&champion);
           for _ in 0..wins_needed { 
             let results = compete (map.clone(), vec![champion.clone(), challenger.clone()]);
+            if let Err (_) = count_send.send (()) {return;}
             if results [1] <= 0.0 {
               continue 'a;
             }
-            if let Err (_) = count_send.send (()) {return;}
           }
           let _ = send.send(challenger);
           return;
@@ -416,7 +416,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
         games_planned -= 1;
         for member in game.into_iter() {
           if let Some (lineage) = lineages.iter_mut().find (| lineage | lineage .id == member.lineage_id){
-            if let Some (index) = lineage.members.iter().position (| lineage | lineage .id == member.lineage_id) {
+            if let Some (index) = lineage.members.iter().position (| member2 | member2.id == member.id) {
               if member.rank >= member.parent_rank || member.games >= (1 << (member.parent_rank - member.rank)) {
                 lineage.members [index] = member;
               }
