@@ -214,7 +214,7 @@ fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64
   //
 //}
 
-const TRAINING_TIME: u64 = 30;
+const TRAINING_TIME: u64 = 1200;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
   let organism = random_organism (vec![((122500/layers) as f64).sqrt() as usize; layers]);
@@ -236,11 +236,12 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
 
   let mut organisms = Vec::new();
   let start = ::std::time::Instant::now();
-  let mut iteration = 0;
+  let mut iteration: usize = 0;
+  let mut organism_count: usize = 10;
   while start.elapsed().as_secs() < TRAINING_TIME {
     iteration += 1;
     let was_empty = organisms.is_empty();
-    while organisms.len() < 10 {
+    while organisms.len() < organism_count {
       organisms.push ((random_organism_default(), Stats {rating: 0.0}));
       if was_empty {
         organisms.push ((random_organism_default(), Stats {rating: 0.0}));
@@ -250,14 +251,16 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
         organisms.push ((new_organism, Stats {rating: 0.0}));
       }
     }
+    let mut any_games = false;
     for index in 0..(organisms.len()-1) {
       if organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
         let results = compete (map.clone(), vec![organisms [index].0.clone(), organisms [index + 1].0.clone()]);
         organisms [index].1.rating += results [0];
         organisms [index + 1].1.rating += results [1];
+        any_games = true;
       }
-      
     }
+    if !any_games { organism_count += 1; }
     organisms.sort_by (|a, b| b.1.rating.partial_cmp(&a.1.rating).unwrap());
     organisms.retain (| &(_, Stats {ref rating})| *rating >= 0.0);
   }
@@ -271,9 +274,9 @@ use crossbeam::sync::{MsQueue as Exchange};
 
 fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   let mut champion = random_organism_default();
-  let mut turnovers = 0;
+  let mut turnovers: usize = 0;
   let start = ::std::time::Instant::now();
-  let mut games = 0;
+  let mut games: usize = 0;
   while start.elapsed().as_secs() < TRAINING_TIME {
     let wins_needed = ((turnovers + 2) as f64).log2() as i32;
     let (send, receive) = channel();
@@ -335,9 +338,9 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   
   crossbeam::scope (| scope | {
     let mut lineages = Vec::<Lineage>::new();
-    let mut next_id = 0;
+    let mut next_id: usize = 0;
     let start = ::std::time::Instant::now();
-    let mut games = 0;
+    let mut games: usize = 0;
 
     for _ in 0..3 {
       let needed_games = & needed_games;
@@ -348,14 +351,17 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
           let results = compete (map.clone(), vec![game [0].organism.clone(), game [1].organism.clone()]);
           game [0].rank += results [0] as i32;
           game [1].rank += results [1] as i32;
+          game [0].games += 1;
+          game [1].games += 1;
           game_results.push (game);
         }
       });
     }
-    let mut games_planned = 0;
+    let mut games_planned: usize = 0;
+    let mut lineage_count: usize = 3;
     while start.elapsed().as_secs() < TRAINING_TIME {
       //lineages.retain (| lineage | !lineage.members.is_empty());
-      while lineages.len() < 3 {
+      while lineages.len() < lineage_count {
         lineages.push (Lineage {
           id: next_id,
           members: vec![Member {
@@ -367,32 +373,31 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       }
       for lineage in lineages.iter_mut() {
         lineage.members.sort_by_key (| member | -member.rank);
-        if lineage.members[0].rank >lineage.members [lineage.members.len() - 1].rank + 4 {
+        if lineage.members.len() > 1 && lineage.members[0].rank >lineage.members [lineage.members.len() - 1].rank + 6 {
           lineage.members.pop();
         }
         while lineage.members.len() < 4 {
           if lineage.members.is_empty() {
             lineage.members.push (Member {
               organism: random_organism_default(),
-              id: next_id + 1,
+              id: next_id,
                           parent_rank: 0, rank: 0, games: 0, lineage_id: lineage .id
             });
           }
           else {
             let new_member = Member {
               organism: random_mutant_default(&lineage.members [0].organism),
-              id: next_id + 1,
+              id: next_id,
                         parent_rank: lineage.members [0].rank, rank: lineage.members [0].rank, games: 0, lineage_id: lineage .id
-            }
-            ;
-            lineage.members.push (new_member,
-            );
+            };
+            lineage.members.push (new_member);
           }
           next_id += 1;
         }
       }
       lineages.sort_by_key (| lineage | -lineage.members[0].rank);
-      while games_planned < 5 {
+      let mut failures = 0;
+      while games_planned < 5 && failures < 50 {
         let lineages = (
           rand::thread_rng().choose (&lineages).unwrap(),
           rand::thread_rng().choose (&lineages).unwrap());
@@ -409,8 +414,11 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
             games_planned += 1;
             needed_games.push (Some (competitors));
           }
+          else { failures += 1; }
         }
+        else { failures += 1; }
       }
+      if failures == 50 { lineage_count += 1; }
       while let Some (game) = game_results.try_pop() {
         games += 1;
         games_planned -= 1;
