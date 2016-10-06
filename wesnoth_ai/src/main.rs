@@ -1,8 +1,9 @@
-#![feature (plugin, custom_derive, slice_patterns)]
-#![plugin (serde_macros)]
+#![feature (rustc_macro, slice_patterns)]
 
 extern crate serde;
 extern crate serde_json;
+#[macro_use]
+extern crate serde_derive;
 extern crate rand;
 extern crate crossbeam;
 
@@ -198,11 +199,33 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
   }
   state
 }
+
+fn draw_state (state: & fake_wesnoth::State) {
+  use std::io;
+  
+  for second in 1.. state.map.height+1 {
+    for first in 1..state.map.width+1 {
+      let location = state.get (first, second);
+      if let Some (unit) = location.unit.as_ref() {
+        print! ("{:2} {}, ", unit.hitpoints, unit.moves);
+      }
+      else {
+        print! ("{:5} ", location.terrain);
+      }
+    }
+    print! ("\n");
+  }
+  
+  let mut input = String::new();
+  io::stdin().read_line (&mut input).unwrap();
+}
+
 fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64> {
   //printlnerr!("Beginning competition...");
   //let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
   while state.scores.is_none() {
+    draw_state (& state);
     let choice = choose_move (&mut state);
     fake_wesnoth::apply_move (&mut state, &choice);
   }
