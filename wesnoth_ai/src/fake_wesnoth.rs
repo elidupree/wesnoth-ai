@@ -309,6 +309,8 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
   
   let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
   let mut dc = make_combatant (defender, defender_attack, attacker);
+  ac.unit.resting = false;
+  dc.unit.resting = false;
   
   while ac.swings_left > 0 || dc.swings_left > 0 {
     if ac.swings_left > 0 {
