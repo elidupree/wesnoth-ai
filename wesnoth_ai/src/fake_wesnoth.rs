@@ -433,20 +433,17 @@ pub fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {
 }
 
 pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
-  let mut frontiers = vec![HashSet::new(); (unit.moves + 1) as usize];
+  let mut frontiers = vec![Vec::new(); (unit.moves + 1) as usize];
+  let mut discovered = HashSet::new();
   let mut results = Vec::new();
-  frontiers [unit.moves as usize].insert ([unit.x, unit.y]);
+  frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
-    for location in ::std::mem::replace (&mut frontiers [moves_left as usize], HashSet::new()) {
+    for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
       for adjacent in adjacent_locations (& state.map, location) {
-        let mut remaining = moves_left - unit.movement_costs.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap();
-        if remaining >= 0 {
+        let stuff = state.get (adjacent [0], adjacent [1]);
+        let mut remaining = moves_left - unit.movement_costs.get (& stuff.terrain).unwrap();
+        if remaining >= 0 && !discovered.contains (&adjacent) && stuff.unit.as_ref().map_or (true, | neighbor | !state.is_enemy (unit.side, neighbor.side)) {
           if remaining >0 {
-            let stuff = state.get (location [0], location [1]);
-            let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
-            if info.village && stuff.village_owner != unit.side + 1 {
-              remaining = 0;
-            }
             for double_adjacent in adjacent_locations (& state.map, adjacent) {
               if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
@@ -454,10 +451,14 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
               }
             }
           }
-          frontiers [remaining as usize].insert (adjacent);
+          discovered.insert (adjacent);
+          frontiers [remaining as usize].push (adjacent);
         }
-      }    
-      results.push ((location, moves_left));
+      }
+      let stuff = state.get (location [0], location [1]);
+      let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
+      let capture = info.village && stuff.village_owner != unit.side + 1;
+      results.push ((location, if capture {0} else {moves_left}));
     }
   }
   results
