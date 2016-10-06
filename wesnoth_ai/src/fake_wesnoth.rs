@@ -417,10 +417,10 @@ pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->Vec<[i32; 2]> {
   vec![
     [coordinates [0], coordinates [1] + 1],
     [coordinates [0], coordinates [1] - 1],
-    [coordinates [0]-1, coordinates [1] + (coordinates [0]&1)],
-    [coordinates [0]-1, coordinates [1] - 1 + (coordinates [0]&1)],
-    [coordinates [0]+1, coordinates [1] + (coordinates [0]&1)],
-    [coordinates [0]+1, coordinates [1] - 1 + (coordinates [0]&1)],
+    [coordinates [0]-1, coordinates [1] - (coordinates [0]&1)],
+    [coordinates [0]-1, coordinates [1] + 1 - (coordinates [0]&1)],
+    [coordinates [0]+1, coordinates [1] - (coordinates [0]&1)],
+    [coordinates [0]+1, coordinates [1] + 1 - (coordinates [0]&1)],
   ].into_iter().filter (|&[x,y]| x >= 1 && y >= 1 && x <= map.width && y <= map.height).collect()
 }
 
