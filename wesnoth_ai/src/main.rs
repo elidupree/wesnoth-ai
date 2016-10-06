@@ -225,7 +225,7 @@ fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64
   //let start = ::std::time::Instant::now();
   let mut state = generate_starting_state (map, players);
   while state.scores.is_none() {
-    draw_state (& state);
+    //draw_state (& state);
     let choice = choose_move (&mut state);
     fake_wesnoth::apply_move (&mut state, &choice);
   }
@@ -383,8 +383,9 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
     let mut games_planned: usize = 0;
     let mut lineage_count: usize = 3;
     while start.elapsed().as_secs() < TRAINING_TIME {
+      let settling = start.elapsed().as_secs() >= TRAINING_TIME - 5;
       //lineages.retain (| lineage | !lineage.members.is_empty());
-      while lineages.len() < lineage_count {
+      while !settling && lineages.len() < lineage_count {
         lineages.push (Lineage {
           id: next_id,
           members: vec![Member {
@@ -396,10 +397,10 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       }
       for lineage in lineages.iter_mut() {
         lineage.members.sort_by_key (| member | -member.rank);
-        if lineage.members.len() > 1 && lineage.members[0].rank >lineage.members [lineage.members.len() - 1].rank + 6 {
+        if !settling && lineage.members.len() > 1 && lineage.members[0].rank >lineage.members [lineage.members.len() - 1].rank + 6 {
           lineage.members.pop();
         }
-        while lineage.members.len() < 4 {
+        while !settling && lineage.members.len() < 4 {
           if lineage.members.is_empty() {
             lineage.members.push (Member {
               organism: random_organism_default(),
@@ -448,7 +449,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
         for member in game.into_iter() {
           if let Some (lineage) = lineages.iter_mut().find (| lineage | lineage .id == member.lineage_id){
             if let Some (index) = lineage.members.iter().position (| member2 | member2.id == member.id) {
-              if member.rank >= member.parent_rank || member.games >= (1 << (member.parent_rank - member.rank)) {
+              if settling || member.rank >= member.parent_rank || member.games >= (1 << (member.parent_rank - member.rank)) {
                 lineage.members [index] = member;
               }
               else {
@@ -462,6 +463,8 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
     }
     for _ in 0..3 {needed_games.push (None);}
     printlnerr!("Lineages training used {} games ", games);
+    
+    
     lineages [0].members [0].organism.clone()
   })
 }
