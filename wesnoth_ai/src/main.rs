@@ -250,6 +250,15 @@ fn compete (map: Arc <fake_wesnoth::Map>, mut players: Vec<Box <fake_wesnoth::Pl
   //
 //}
 
+fn play_show_game (map: Arc <fake_wesnoth::Map>, mut players: Vec<Box <fake_wesnoth::Player >>) {
+  let mut state = generate_starting_state (map, &mut players);
+  while state.scores.is_none() {
+    draw_state (& state);
+    let choice = players [state.current_side].choose_move (&mut state);
+    fake_wesnoth::apply_move (&mut state, &mut players, &choice);
+  }
+}
+
 const DEFAULT_TRAINING_TIME: u64 = 120;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
@@ -550,6 +559,9 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Org
     let lock = champion.lock().unwrap();
     result = lock.organism.clone();
     printlnerr!("Against-naive training used {} games, with {} turnovers. Current champion scored {}/{}", games.load (Ordering::Relaxed), turnovers.load (Ordering::Relaxed), lock.wins, lock.games);
+  }
+  for _ in 0..3 {
+    play_show_game (map.clone(), vec![make_player (&map, result.clone()), Box::new (naive_ai::Player::new(&map))]);
   }
   result
 }
