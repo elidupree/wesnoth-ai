@@ -21,6 +21,7 @@ use serde::Serialize;
 
 mod fake_wesnoth;
 mod rust_lua_shared;
+mod naive_ai;
 use rust_lua_shared::*;
 
 /// One individual "organism" shareable with Lua.

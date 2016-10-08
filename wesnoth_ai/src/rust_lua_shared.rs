@@ -134,8 +134,8 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
     },
     &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
       let mut attacker = state.get (src_x, src_y).unit.clone().unwrap();
-      attacker.x = src_x;
-      attacker.y = src_y;
+      attacker.x = dst_x;
+      attacker.y = dst_y;
       let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
       let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, usize::max_value() - 1);
       NeuralInput {
