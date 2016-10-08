@@ -6,7 +6,7 @@ extern crate serde_json;
 extern crate serde_derive;
 extern crate rand;
 extern crate crossbeam;
-
+er
 macro_rules! printerr(
     ($($arg:tt)*) => { {use std::io::Write;
         let r = write!(&mut ::std::io::stderr(), $($arg)*);
@@ -507,12 +507,11 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Org
     threads.push (thread::spawn (move | | {
       let start = ::std::time::Instant::now();
       'a: while start.elapsed().as_secs() < seconds {
-        let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
         let mut challenger = Contestant {
           organism: random_mutant_default (&champion.lock().unwrap().organism),
           wins: 0, games: 0,
         };
-        for index in 0..desired_champion_games { 
+        loop { 
           let results = compete (map.clone(), vec![make_player (&map, challenger.organism.clone()), Box::new (naive_ai::Player::new(&map))]);
           challenger.games += 1;
           games.fetch_add (1, Ordering::Relaxed);
@@ -530,10 +529,12 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Org
           }
           if challenger.games > lock.games || (challenger.games == lock.games && lock.wins*challenger.games < challenger.wins*lock.games) {
             *lock = challenger.clone();
-            if index == desired_champion_games - 1 {
-              turnovers.fetch_add (1, Ordering::Relaxed);
-            }
             printlnerr!("Set {}/{}", challenger.wins, challenger.games);
+            let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
+            if challenger.games >= desired_champion_games {
+              turnovers.fetch_add (1, Ordering::Relaxed);
+              continue 'a;
+            }
           }
         }
       }
