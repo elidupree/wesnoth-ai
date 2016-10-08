@@ -88,11 +88,12 @@ impl Player {
       },
       &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
         let mut attacker = state.get (src_x, src_y).unit.clone().unwrap();
+        if attacker.canrecruit && (src_x != dst_x || src_y != dst_y){return -1.0;}
         attacker.x = dst_x;
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
         let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, usize::max_value() - 1);
-        self.stats_badness (&defender, &stats.1) - self.stats_badness (&attacker, &stats.0)
+        random::<f64>() + self.stats_badness (&defender, &stats.1) - self.stats_badness (&attacker, &stats.0)
       }
       &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
         let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();

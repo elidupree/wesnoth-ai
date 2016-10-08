@@ -7,6 +7,12 @@ extern crate serde_derive;
 extern crate rand;
 extern crate crossbeam;
 
+macro_rules! printerr(
+    ($($arg:tt)*) => { {use std::io::Write;
+        let r = write!(&mut ::std::io::stderr(), $($arg)*);
+        r.expect("failed printing to stderr");
+    } }
+);
 macro_rules! printlnerr(
     ($($arg:tt)*) => { {use std::io::Write;
         let r = writeln!(&mut ::std::io::stderr(), $($arg)*);
@@ -214,13 +220,13 @@ fn draw_state (state: & fake_wesnoth::State) {
     for first in 1..state.map.width+1 {
       let location = state.get (first, second);
       if let Some (unit) = location.unit.as_ref() {
-        print! ("{:2} {}, ", unit.hitpoints, unit.moves);
+        printerr! ("{:2} {}, ", unit.hitpoints, unit.moves);
       }
       else {
-        print! ("{:5} ", location.terrain);
+        printerr! ("{:5} ", location.terrain);
       }
     }
-    print! ("\n");
+    printerr! ("\n");
   }
   
   let mut input = String::new();
@@ -500,8 +506,8 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
         
     threads.push (thread::spawn (move | | {
       let start = ::std::time::Instant::now();
-      let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
       'a: while start.elapsed().as_secs() < TRAINING_TIME {
+        let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
         let mut challenger = Contestant {
           organism: random_mutant_default (&champion.lock().unwrap().organism),
           wins: 0, games: 0,
@@ -511,8 +517,12 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
           challenger.games += 1;
           games.fetch_add (1, Ordering::Relaxed);
           
-          if results [1] > 0.0 {
+          if results [0] > 0.0 {
             challenger.wins += 1;
+            //printlnerr!("Win {}/{}", challenger.wins, challenger.games);
+          }
+          else {
+            //printlnerr!("Lose {}/{}", challenger.wins, challenger.games);
           }
           let mut lock = champion.lock().unwrap();
           if lock.games >= challenger.games && lock.wins*challenger.games > challenger.wins*lock.games {
@@ -523,6 +533,7 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
             if index == desired_champion_games - 1 {
               turnovers.fetch_add (1, Ordering::Relaxed);
             }
+            printlnerr!("Set {}/{}", challenger.wins, challenger.games);
           }
         }
       }
@@ -531,8 +542,9 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   for thread in threads {thread.join().unwrap();}
   let result;
   {
-    result = champion.lock().unwrap().organism.clone();
-    printlnerr!("Against-naive training used {} games, with {} turnovers", games.load (Ordering::Relaxed), turnovers.load (Ordering::Relaxed));
+    let lock = champion.lock().unwrap();
+    result = lock.organism.clone();
+    printlnerr!("Against-naive training used {} games, with {} turnovers. Current champion scored {}/{}", games.load (Ordering::Relaxed), turnovers.load (Ordering::Relaxed), lock.wins, lock.games);
   }
   result
 }
