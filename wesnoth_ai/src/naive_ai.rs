@@ -38,6 +38,8 @@ impl fake_wesnoth::Player for Player {
 }
 
 impl Player {
+  pub fn new(map: & fake_wesnoth::Map)->Player {Player {unit_moves: vec![None; (map.width*map.height) as usize]}}
+
   pub fn calculate_moves (&mut self, state: &fake_wesnoth::State) {
     for (index, location) in state.locations.iter().enumerate() {
       if let Some (unit) = location.unit.as_ref() {

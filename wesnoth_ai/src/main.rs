@@ -15,7 +15,8 @@ macro_rules! printlnerr(
 );
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc,Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use rand::{Rng, random};
 use serde::Serialize;
 
@@ -243,7 +244,7 @@ fn compete (map: Arc <fake_wesnoth::Map>, mut players: Vec<Box <fake_wesnoth::Pl
   //
 //}
 
-const TRAINING_TIME: u64 = 1200;
+const TRAINING_TIME: u64 = 30;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
   let organism = random_organism (vec![((122500/layers) as f64).sqrt() as usize; layers]);
@@ -477,6 +478,67 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
 
 
 
+fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+  #[derive (Clone)]
+  struct Contestant {
+    organism: Arc <Organism>,
+    wins: i32,
+    games: i32,
+  }
+  let champion = Arc::new (Mutex::new (Contestant {
+    organism: random_organism_default(),
+    wins: 0, games: 0,
+  }));
+  let turnovers = Arc::new (AtomicUsize::new (0));
+  let games = Arc::new (AtomicUsize::new (0));
+  let mut threads = Vec::new();
+  for _ in 0..3 {
+    let champion = champion.clone();
+    let map = map.clone();
+    let turnovers = turnovers.clone();
+    let games = games.clone();
+        
+    threads.push (thread::spawn (move | | {
+      let start = ::std::time::Instant::now();
+      let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
+      'a: while start.elapsed().as_secs() < TRAINING_TIME {
+        let mut challenger = Contestant {
+          organism: random_mutant_default (&champion.lock().unwrap().organism),
+          wins: 0, games: 0,
+        };
+        for index in 0..desired_champion_games { 
+          let results = compete (map.clone(), vec![make_player (&map, challenger.organism.clone()), Box::new (naive_ai::Player::new(&map))]);
+          challenger.games += 1;
+          games.fetch_add (1, Ordering::Relaxed);
+          
+          if results [1] > 0.0 {
+            challenger.wins += 1;
+          }
+          let mut lock = champion.lock().unwrap();
+          if lock.games >= challenger.games && lock.wins*challenger.games > challenger.wins*lock.games {
+            continue 'a;
+          }
+          if challenger.games > lock.games || (challenger.games == lock.games && lock.wins*challenger.games < challenger.wins*lock.games) {
+            *lock = challenger.clone();
+            if index == desired_champion_games - 1 {
+              turnovers.fetch_add (1, Ordering::Relaxed);
+            }
+          }
+        }
+      }
+    }));
+  }
+  for thread in threads {thread.join().unwrap();}
+  let result;
+  {
+    result = champion.lock().unwrap().organism.clone();
+    printlnerr!("Against-naive training used {} games, with {} turnovers", games.load (Ordering::Relaxed), turnovers.load (Ordering::Relaxed));
+  }
+  result
+}
+
+
+
 
 
 fn tournament (map: Arc <fake_wesnoth::Map>, organisms: Vec<(Arc <Organism>, & 'static str)>)->Arc <Organism> {
@@ -520,6 +582,7 @@ fn main() {
   }
   
   let winner = tournament (map.clone(), vec![
+    (against_naive_training(map.clone()), "against_naive_training"),
     (random_organism_default(), "no training"),
     (original_training (map.clone()), "original_training"),
     (first_to_beat_the_champion_training (map.clone()), "first_to_beat_the_champion_training"),
