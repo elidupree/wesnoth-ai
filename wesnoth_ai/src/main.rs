@@ -498,7 +498,7 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Org
   let turnovers = Arc::new (AtomicUsize::new (0));
   let games = Arc::new (AtomicUsize::new (0));
   let mut threads = Vec::new();
-  let reference_to_test_ratio = 20;
+
   for _ in 0..3 {
     let champion = champion.clone();
     let map = map.clone();
@@ -528,14 +528,13 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Org
             }
           }
           let mut lock = champion.lock().unwrap();
-          if lock.games >= challenger.games*reference_to_test_ratio && lock.wins*challenger.games > challenger.wins*lock.games {
+          if lock.games >= challenger.games && lock.wins*challenger.games > challenger.wins*lock.games {
             continue 'a;
           }
           if challenger.games > lock.games || (challenger.games == lock.games && lock.wins*challenger.games < challenger.wins*lock.games) {
             *lock = challenger.clone();
             printlnerr!("Set {}/{}", challenger.wins, challenger.games);
-            let desired_champion_test_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
-            let desired_champion_games = desired_champion_test_games*reference_to_test_ratio;
+            let desired_champion_games = (((start.elapsed().as_secs() + 2) as f64).log2()*20.0) as i32;
             if challenger.games >= desired_champion_games {
               turnovers.fetch_add (1, Ordering::Relaxed);
               continue 'a;
