@@ -4,6 +4,14 @@ use rand::{self, Rng};
 use super::*;
 use super::rust_lua_shared::*;
 
+pub trait Player {
+  fn move_completed (&mut self, state: & State, previous: & Unit, current: & Unit);
+  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: & Option <Unit>, new_defender: & Option <Unit>);
+  fn recruit_completed (&mut self, state: & State, unit: & Unit);
+  fn turn_started (&mut self, state: & State);
+  fn choose_move (&self, state: & State)->Move;
+}
+     
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Attack {
@@ -18,10 +26,7 @@ pub struct Side {
   pub gold: i32,
   pub enemies: HashSet <usize>,
   pub recruits: Vec<String>,
-  pub player: Arc <Organism>,
-  pub memory: Memory,
 }
-
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Unit {
@@ -56,7 +61,7 @@ pub struct Location {
   pub terrain: String,
   pub village_owner: usize,
   pub unit: Option <Box <Unit>>,
-  pub unit_moves: Option <Vec<(Move, f64)>>,
+
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct TerrainInfo{
@@ -119,23 +124,23 @@ pub enum Move {
   EndTurn,
 }
 
-pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
+pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & Move) {
   let mut results = Vec::new();
   match input {
     &Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
       let mut unit = state.get_mut (src_x, src_y).unit.take().unwrap();
-      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, &unit)});
+      let old_unit = unit.clone();
       unit.x = dst_x;
       unit.y = dst_y;
       unit.moves = moves_left;
       unit.resting = false;
-      results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
       if state.map.config.terrain_info.get (&state.get (dst_x, dst_y).terrain).unwrap().village {
         state.get_mut (dst_x, dst_y).village_owner = unit.side + 1;
       }
-      state.get_mut (dst_x, dst_y).unit = Some (unit);
-      invalidate_moves (state, [src_x, src_y], 0);
-      invalidate_moves (state, [dst_x, dst_y], 0);
+      state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
+      for player in players.iter_mut() {
+        player.move_completed (state, &old_unit, &unit);
+      }
     },
     &Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
       //printlnerr!("Attack: {:?}", input);
@@ -150,19 +155,10 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       attacker.attacks_left -= 1;
       let (new_attacker, new_defender) = combat_results (state, &attacker, &defender, weapon);
       
-      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & attacker)});
-      if let Some (unit) = new_attacker.as_ref() {
-        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
-      }
-      results.push (NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & defender)});
-      if let Some (unit) = new_defender.as_ref() {
-        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
-      }
-      
       let check_game_over = (attacker.canrecruit && new_attacker.is_none()) || (defender.canrecruit && new_defender.is_none());
       
-      state.get_mut (dst_x, dst_y).unit = new_attacker;
-      state.get_mut (attack_x, attack_y).unit = new_defender;
+      state.get_mut (dst_x, dst_y).unit = new_attacker.clone();
+      state.get_mut (attack_x, attack_y).unit = new_defender.clone();
       
       if check_game_over {
         let mut remaining_leaders = Vec::new();
@@ -181,8 +177,9 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
           state.scores.as_mut().unwrap()[remaining_leaders [0].side] = 1.0;
         }
       }
-      invalidate_moves (state, [dst_x, dst_y], 1);
-      invalidate_moves (state, [attack_x, attack_y], 1);
+      for player in players.iter_mut() {
+        player.attack_completed (state, & attacker, & defender, & new_attacker, & new_defender);
+      }
     }
     &Move::Recruit {dst_x, dst_y, ref unit_type} => {
       let mut unit = Box::new (state.map.config.unit_type_examples.get (unit_type).unwrap().clone());
@@ -191,10 +188,11 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
       unit.y = dst_y;
       unit.moves = 0;
       unit.attacks_left = 0;
-      results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
       state.sides [state.current_side].gold -= unit.cost;
-      state.get_mut (dst_x, dst_y).unit = Some (unit);
-      invalidate_moves (state, [dst_x, dst_y], 0);
+      state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
+      for player in players.iter_mut() {
+        player.recruit_completed (state, &unit);
+      }
     },
     & Move::EndTurn => {
       state.current_side += 1;
@@ -219,23 +217,15 @@ pub fn apply_move (state: &mut State, input: & Move)->Vec<NeuralInput> {
             if healing < 0 && unit.hitpoints > 1{
               unit.hitpoints = ::std::cmp::max (1, unit.hitpoints + healing);
             }
-            
           }
-          added_units.push (index);
-          
         }
-      }
-      results.push (NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
-      for index in added_units {
-        let unit = state.locations[index].unit.as_ref().unwrap();
-        results.push (NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
       }
       if state.turn >state.max_turns {
         // timeout = everybody loses
         state.scores = Some (vec![-1.0; state.sides.len()]);
       }
-      for location in state.locations.iter_mut() {
-        location.unit_moves = None;
+      for player in players.iter_mut() {
+        player.turn_started (state);
       }
     },
   }

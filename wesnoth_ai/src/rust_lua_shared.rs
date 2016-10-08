@@ -3,6 +3,12 @@ use std::collections::{HashMap, HashSet};
 use fake_wesnoth;
 use super::*;
 
+pub struct NeuralPlayer {
+  pub organism: Arc <Organism>,
+  pub memory: Memory,
+  pub unit_moves: Vec<Option <Vec<(Move, f64)>>>,
+}
+
 //Avoid the built in tanh, to guarantee my consistency with Lua
 pub fn hyperbolic_tangent (value: f64)->f64 {
   if value >  18.0 {return  1.0;}
@@ -46,6 +52,12 @@ pub fn initial_memory (organism: & Organism)->Memory {
   result 
 }
 
+impl NeuralPlayer {
+  fn process_input (&mut self, input: & NeuralInput) {
+    self.memory = next_memory (& self.organism, & self.memory, input);
+  }
+}
+
 pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInput)->f64 {
   //printlnerr!("Evaluating {:?}", input);
   if input.input_type == "end_turn" {return 0.0;}
@@ -53,6 +65,7 @@ pub fn evaluate_move (organism: & Organism, memory: & Memory, input: & NeuralInp
   multiply_into (&next_memory (organism, memory, input).layers.last().unwrap(), &mut output, & organism.output_weights);
   output [0]
 }
+
 
 thread_local! {
   pub static INPUTS: HashMap <String, usize> = {
@@ -218,6 +231,57 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
   
   results
 }
+
+
+use fake_wesnoth::{State, Unit, Move};
+
+impl fake_wesnoth::Player for NeuralPlayer {
+  fn move_completed (&mut self, state: & State, previous: & Unit, current: & Unit) {
+    self.process_input (& NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & previous)});
+    self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, & current)});
+    self.invalidate_moves (state, [previous.x, previous.y], 0);
+    self.invalidate_moves (state, [current.x, current.y], 0)
+  }
+  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: & Option <Unit>, new_defender: & Option <Unit>) {
+    self.process_input (& NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & attacker)});
+    if let Some (unit) = new_attacker.as_ref() {
+      self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
+    }
+    self.process_input (& NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & defender)});
+    if let Some (unit) = new_defender.as_ref() {
+      self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
+    }
+    self.invalidate_moves (state, [attacker.x, attacker.y], 1);
+    self.invalidate_moves (state, [defender.x, defender.y], 1);
+  }
+
+  fn recruit_completed (&mut self, state: & State, unit: & Unit) {
+    self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
+    self.invalidate_moves (state, [dst_x, dst_y], 0);
+  }
+
+  fn turn_started (&mut self, state: & State) {
+    for location in state.locations.enumerate() {
+      if let Some (unit) = location.unit.as_ref() {
+        self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
+      }
+    }
+    for location in self.unit_moves.iter_mut() {
+      *location = None;
+    }
+    self.process_input (& NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
+  }
+
+  fn choose_move (&self, state: & State)->Move {
+  
+  }
+}
+
+      
+
+      
+      
+
 
 pub fn calculate_moves (state: &mut fake_wesnoth::State) {
   let mut added_moves: HashMap <usize,Vec<(fake_wesnoth::Move, f64)>> = HashMap::new();
