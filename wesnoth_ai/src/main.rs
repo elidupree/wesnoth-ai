@@ -250,7 +250,7 @@ fn compete (map: Arc <fake_wesnoth::Map>, mut players: Vec<Box <fake_wesnoth::Pl
   //
 //}
 
-const TRAINING_TIME: u64 = 30;
+const DEFAULT_TRAINING_TIME: u64 = 120;
 fn random_organism_default()->Arc<Organism> {
   let layers = rand::thread_rng().gen_range (1, 4);
   let organism = random_organism (vec![((122500/layers) as f64).sqrt() as usize; layers]);
@@ -265,7 +265,7 @@ fn random_mutant_default(organism: & Organism)->Arc<Organism> {
   }
 }
 
-fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+fn original_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Organism> {
   struct Stats {
     rating: f64,
   }
@@ -274,7 +274,7 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
   let start = ::std::time::Instant::now();
   let mut iteration: usize = 0;
   let mut organism_count: usize = 10;
-  while start.elapsed().as_secs() < TRAINING_TIME {
+  while start.elapsed().as_secs() < seconds {
     iteration += 1;
     let was_empty = organisms.is_empty();
     while organisms.len() < organism_count {
@@ -308,12 +308,12 @@ use std::{thread,time};
 use std::sync::mpsc::channel;
 use crossbeam::sync::{MsQueue as Exchange};
 
-fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Organism> {
   let mut champion = random_organism_default();
   let mut turnovers: usize = 0;
   let start = ::std::time::Instant::now();
   let mut games: usize = 0;
-  while start.elapsed().as_secs() < TRAINING_TIME {
+  while start.elapsed().as_secs() < seconds {
     let wins_needed = ((turnovers + 2) as f64).log2() as i32;
     let (send, receive) = channel();
     let (count_send, count_receive) = channel();
@@ -337,7 +337,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
         }
       });
     }
-    while start.elapsed().as_secs() < TRAINING_TIME {
+    while start.elapsed().as_secs() < seconds {
       if let Ok (_) = count_receive.try_recv() {
         games += 1;
       }
@@ -355,7 +355,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
 
 
 
-fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Organism> {
   struct Lineage {
     id: usize,
     members: Vec<Member>,
@@ -395,8 +395,8 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
     }
     let mut games_planned: usize = 0;
     let mut lineage_count: usize = 3;
-    while start.elapsed().as_secs() < TRAINING_TIME {
-      let settling = start.elapsed().as_secs() >= TRAINING_TIME - 5;
+    while start.elapsed().as_secs() < seconds {
+      let settling = start.elapsed().as_secs() >= seconds - 5;
       //lineages.retain (| lineage | !lineage.members.is_empty());
       while !settling && lineages.len() < lineage_count {
         lineages.push (Lineage {
@@ -484,7 +484,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
 
 
 
-fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
+fn against_naive_training (map: Arc <fake_wesnoth::Map>, seconds: u64)->Arc <Organism> {
   #[derive (Clone)]
   struct Contestant {
     organism: Arc <Organism>,
@@ -506,7 +506,7 @@ fn against_naive_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
         
     threads.push (thread::spawn (move | | {
       let start = ::std::time::Instant::now();
-      'a: while start.elapsed().as_secs() < TRAINING_TIME {
+      'a: while start.elapsed().as_secs() < seconds {
         let desired_champion_games = ((start.elapsed().as_secs() + 2) as f64).log2() as i32;
         let mut challenger = Contestant {
           organism: random_mutant_default (&champion.lock().unwrap().organism),
@@ -594,11 +594,11 @@ fn main() {
   }
   
   let winner = tournament (map.clone(), vec![
-    (against_naive_training(map.clone()), "against_naive_training"),
+    (against_naive_training(map.clone(), 1200), "against_naive_training"),
     (random_organism_default(), "no training"),
-    (original_training (map.clone()), "original_training"),
-    (first_to_beat_the_champion_training (map.clone()), "first_to_beat_the_champion_training"),
-    (ranked_lineages_training(map.clone()), "ranked_lineages_training"),
+    (original_training (map.clone(), DEFAULT_TRAINING_TIME), "original_training"),
+    (first_to_beat_the_champion_training (map.clone(), DEFAULT_TRAINING_TIME), "first_to_beat_the_champion_training"),
+    (ranked_lineages_training(map.clone(), DEFAULT_TRAINING_TIME), "ranked_lineages_training"),
   ]);
   
   println!("return {{
