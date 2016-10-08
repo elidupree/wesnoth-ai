@@ -158,12 +158,12 @@ fn play_move (state: &mut fake_wesnoth::State, replay: &mut Replay, action: & We
   
 }*/
 
-fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->fake_wesnoth::State {
+fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box <fake_wesnoth::Player>>)->fake_wesnoth::State {
   let mut side_assignments: Vec<_> = (0.. players.len()).collect();
   rand::thread_rng().shuffle (&mut side_assignments);
   let mut locations = map.locations.clone();
   let mut sides = Vec::new();
-  for (index, player) in players.into_iter().enumerate() {
+  for (index, _) in players.into_iter().enumerate() {
     let faction = rand::thread_rng().choose (&map.config.factions).unwrap();
     let mut leader = Box::new (map.config.unit_type_examples.get (rand::thread_rng().choose (&faction.leaders).unwrap()).unwrap().clone());
     leader.x = map.starting_locations [index][0];
@@ -179,11 +179,9 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
       gold: 40,
       enemies: enemies,
       recruits: faction.recruits.clone(),
-      player: player.clone(),
-      memory: initial_memory (& player),
     });
   }
-  let mut state = fake_wesnoth::State {
+  let state = fake_wesnoth::State {
     map: map,
     current_side: 0,
     locations: locations,
@@ -193,11 +191,18 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Orga
     max_turns: 10,
     scores: None,
   };
-  let input = neural_turn_started (&state);
-  for side in state.sides.iter_mut() {
-    side.memory = next_memory (& side.player, & side.memory, &NeuralInput {input_type: "turn_started".to_string(), vector: input.clone() });
+  for player in players.iter_mut() {
+    player.turn_started (& state);
   }
   state
+}
+
+fn make_player (map: & fake_wesnoth::Map, organism: Arc <Organism>)->Box <fake_wesnoth::Player> {
+  Box::new (NeuralPlayer {
+    organism: organism.clone(),
+    memory: initial_memory (& organism),
+    unit_moves: vec![None; (map.width*map.height) as usize],
+  })
 }
 
 fn draw_state (state: & fake_wesnoth::State) {
@@ -220,14 +225,14 @@ fn draw_state (state: & fake_wesnoth::State) {
   io::stdin().read_line (&mut input).unwrap();
 }
 
-fn compete (map: Arc <fake_wesnoth::Map>, players: Vec<Arc <Organism>>)->Vec<f64> {
+fn compete (map: Arc <fake_wesnoth::Map>, mut players: Vec<Box <fake_wesnoth::Player >>)->Vec<f64> {
   //printlnerr!("Beginning competition...");
   //let start = ::std::time::Instant::now();
-  let mut state = generate_starting_state (map, players);
+  let mut state = generate_starting_state (map, &mut players);
   while state.scores.is_none() {
     //draw_state (& state);
-    let choice = choose_move (&mut state);
-    fake_wesnoth::apply_move (&mut state, &choice);
+    let choice = players [state.current_side].choose_move (&mut state);
+    fake_wesnoth::apply_move (&mut state, &mut players, &choice);
   }
   //let duration = start.elapsed();
   //printlnerr!("Competition completed in {} seconds + {} nanoseconds", duration.as_secs(), duration.subsec_nanos());
@@ -277,7 +282,7 @@ fn original_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
     let mut any_games = false;
     for index in 0..(organisms.len()-1) {
       if organisms [index].1.rating <= organisms [index+1].1.rating + 2.0 {
-        let results = compete (map.clone(), vec![organisms [index].0.clone(), organisms [index + 1].0.clone()]);
+        let results = compete (map.clone(), vec![make_player (&map, organisms [index].0.clone()), make_player (&map, organisms [index + 1].0.clone())]);
         organisms [index].1.rating += results [0];
         organisms [index + 1].1.rating += results [1];
         any_games = true;
@@ -313,7 +318,7 @@ fn first_to_beat_the_champion_training (map: Arc <fake_wesnoth::Map>)->Arc <Orga
         'a: loop {
           let challenger = random_mutant_default (&champion);
           for _ in 0..wins_needed { 
-            let results = compete (map.clone(), vec![champion.clone(), challenger.clone()]);
+            let results = compete (map.clone(), vec![make_player (&map, champion.clone()), make_player (&map, challenger.clone())]);
             if let Err (_) = count_send.send (()) {return;}
             if results [1] <= 0.0 {
               continue 'a;
@@ -371,7 +376,7 @@ fn ranked_lineages_training (map: Arc <fake_wesnoth::Map>)->Arc <Organism> {
       let map = & map;
       scope.spawn (move || {
         while let Some (mut game) = needed_games.pop() {
-          let results = compete (map.clone(), vec![game [0].organism.clone(), game [1].organism.clone()]);
+          let results = compete (map.clone(), vec![make_player (&map, game [0].organism.clone()), make_player (&map, game [1].organism.clone())]);
           game [0].rank += results [0] as i32;
           game [1].rank += results [1] as i32;
           game [0].games += 1;
@@ -479,7 +484,7 @@ fn tournament (map: Arc <fake_wesnoth::Map>, organisms: Vec<(Arc <Organism>, & '
     for (second_index, second) in organisms.iter().enumerate() {
       if first_index != second_index {
         for _ in 0..10 {
-          let results = compete (map.clone(), vec![first.0.clone(), second.0.clone()]);
+          let results = compete (map.clone(), vec![make_player (&map, first.0.clone()), make_player (&map, second.0.clone())]);
           total_scores [first_index] += results [0];
           total_scores [second_index] += results [1];
         }

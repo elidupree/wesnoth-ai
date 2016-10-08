@@ -1,15 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{self, Rng};
-use super::*;
-use super::rust_lua_shared::*;
 
 pub trait Player {
   fn move_completed (&mut self, state: & State, previous: & Unit, current: & Unit);
-  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: & Option <Unit>, new_defender: & Option <Unit>);
+  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: Option <&Unit>, new_defender: Option <&Unit>);
   fn recruit_completed (&mut self, state: & State, unit: & Unit);
   fn turn_started (&mut self, state: & State);
-  fn choose_move (&self, state: & State)->Move;
+  fn choose_move (&mut self, state: & State)->Move;
 }
      
 
@@ -124,8 +122,7 @@ pub enum Move {
   EndTurn,
 }
 
-pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & Move) {
-  let mut results = Vec::new();
+pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & Move) {
   match input {
     &Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
       let mut unit = state.get_mut (src_x, src_y).unit.take().unwrap();
@@ -145,9 +142,9 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & 
     &Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
       //printlnerr!("Attack: {:?}", input);
       if src_x != dst_x || src_y != dst_y {
-        results.extend (apply_move (state, &Move::Move {
+        apply_move (state, players, &Move::Move {
           src_x: src_x, src_y: src_y, dst_x: dst_x, dst_y: dst_y, moves_left: 0
-        }));
+        });
       }
       let mut attacker = state.get_mut (dst_x, dst_y).unit.take().unwrap();
       let defender = state.get_mut (attack_x, attack_y).unit.take().unwrap();
@@ -178,7 +175,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & 
         }
       }
       for player in players.iter_mut() {
-        player.attack_completed (state, & attacker, & defender, & new_attacker, & new_defender);
+        player.attack_completed (state, & attacker, & defender, new_attacker.as_ref().map (| unit | &**unit), new_defender.as_ref().map (| unit | &**unit));
       }
     }
     &Move::Recruit {dst_x, dst_y, ref unit_type} => {
@@ -202,8 +199,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & 
         state.time_of_day = (state.time_of_day + 1) % 6;
       }
       state.sides [state.current_side].gold += total_income (state, state.current_side);
-      let mut added_units = Vec::new();
-      for (index, location) in state.locations.iter_mut().enumerate() {
+      for location in state.locations.iter_mut() {
         if let Some (unit) = location.unit.as_mut() {
           if unit.side == state.current_side {
             let terrain_healing = state.map.config.terrain_info.get (&location.terrain).unwrap().healing;
@@ -229,15 +225,6 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Arc <Player>>, input: & 
       }
     },
   }
-  
-  for side in state.sides.iter_mut() {
-    for input in results.iter() {
-      side.memory = next_memory (& side.player, & side.memory, input);
-      //printlnerr!("Processed {:?}", input);
-    }
-  }
-  
-  results
 }
 
 pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->usize {

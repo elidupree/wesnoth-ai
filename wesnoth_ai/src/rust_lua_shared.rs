@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use fake_wesnoth;
 use super::*;
@@ -242,7 +243,7 @@ impl fake_wesnoth::Player for NeuralPlayer {
     self.invalidate_moves (state, [previous.x, previous.y], 0);
     self.invalidate_moves (state, [current.x, current.y], 0)
   }
-  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: & Option <Unit>, new_defender: & Option <Unit>) {
+  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: Option <& Unit>, new_defender: Option <& Unit>) {
     self.process_input (& NeuralInput {input_type: "unit_removed".to_string(), vector: neural_unit (state, & attacker)});
     if let Some (unit) = new_attacker.as_ref() {
       self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
@@ -257,11 +258,11 @@ impl fake_wesnoth::Player for NeuralPlayer {
 
   fn recruit_completed (&mut self, state: & State, unit: & Unit) {
     self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, &unit)});
-    self.invalidate_moves (state, [dst_x, dst_y], 0);
+    self.invalidate_moves (state, [unit.x, unit.y], 0);
   }
 
   fn turn_started (&mut self, state: & State) {
-    for location in state.locations.enumerate() {
+    for location in state.locations.iter() {
       if let Some (unit) = location.unit.as_ref() {
         self.process_input (& NeuralInput {input_type: "unit_added".to_string(), vector: neural_unit (state, unit)});
       }
@@ -272,57 +273,47 @@ impl fake_wesnoth::Player for NeuralPlayer {
     self.process_input (& NeuralInput {input_type: "turn_started".to_string(), vector: neural_turn_started (state)});
   }
 
-  fn choose_move (&self, state: & State)->Move {
-  
+  fn choose_move (&mut self, state: & State)->Move {
+    let mut moves = self.collect_moves (state);
+    moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
+    //printlnerr!("Moves: {:?}", moves);
+    moves.iter().rev().next().unwrap().0.clone()
   }
 }
 
-      
-
-      
-      
-
-
-pub fn calculate_moves (state: &mut fake_wesnoth::State) {
-  let mut added_moves: HashMap <usize,Vec<(fake_wesnoth::Move, f64)>> = HashMap::new();
-  for (index, location) in state.locations.iter().enumerate() {
-    if let Some (unit) = location.unit.as_ref() {
-      if location.unit_moves.is_none() && unit.side == state.current_side {
-        added_moves.insert (index, possible_unit_moves (state, unit).into_iter().map (| action | {
-          let evaluation = evaluate_move (& state.sides [state.current_side].player, & state.sides [state.current_side].memory, &neural_wesnoth_move (state, &action));
-          (action, evaluation)
-        }).collect());
+impl NeuralPlayer {
+  pub fn calculate_moves (&mut self, state: &fake_wesnoth::State) {
+    for (index, location) in state.locations.iter().enumerate() {
+      if let Some (unit) = location.unit.as_ref() {
+        if self.unit_moves [index].is_none() && unit.side == state.current_side {
+          self.unit_moves [index] = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
+            let evaluation = evaluate_move (& self.organism, & self.memory, &neural_wesnoth_move (state, &action));
+            (action, evaluation)
+          }).collect());
+        }
       }
     }
   }
-  for (index, moves) in added_moves {
-    state.locations [index].unit_moves = Some (moves)
-  }
-}
-
-pub fn invalidate_moves (state: &mut fake_wesnoth::State, origin: [i32; 2], extra_turns: i32) {
-  for location in state.locations.iter_mut() {
-    if location.unit.as_ref().map_or (true, | unit | fake_wesnoth::distance_between ([unit.x, unit.y], origin) <= unit.moves + 1 + extra_turns*unit.max_moves) {
-      location.unit_moves = None;
-    }
-  }
-}
-
-pub fn collect_moves (state: &mut fake_wesnoth::State)->Vec<(fake_wesnoth::Move, f64)> {
-  calculate_moves (state);
   
-  let mut results = vec![(fake_wesnoth::Move::EndTurn, 0.0)];
-  for location in state.locations.iter() {
-    if let Some (moves) = location.unit_moves.as_ref() {
-      results.extend (moves.into_iter().cloned());
+  pub fn invalidate_moves (&mut self, state: &fake_wesnoth::State, origin: [i32; 2], extra_turns: i32) {
+    for (index, location) in state.locations.iter().enumerate() {
+      if location.unit.as_ref().map_or (true, | unit | fake_wesnoth::distance_between ([unit.x, unit.y], origin) <= unit.moves + 1 + extra_turns*unit.max_moves) {
+        self.unit_moves [index] = None;
+      }
     }
   }
   
-  results
+  pub fn collect_moves (&mut self, state: &fake_wesnoth::State)->Vec<(fake_wesnoth::Move, f64)> {
+    self.calculate_moves (state);
+  
+    let mut results = vec![(fake_wesnoth::Move::EndTurn, 0.0)];
+    for location in self.unit_moves.iter() {
+      if let Some (moves) = location.as_ref() {
+        results.extend (moves.into_iter().cloned());
+      }
+    }
+  
+    results
+  }
 }
-pub fn choose_move (state: &mut fake_wesnoth::State)->fake_wesnoth::Move {
-  let mut moves = collect_moves (state);
-  moves.sort_by (|a, b| a.1.partial_cmp(&b.1).unwrap());
-  //printlnerr!("Moves: {:?}", moves);
-  moves.iter().rev().next().unwrap().0.clone()
-}
+
