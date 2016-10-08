@@ -6,7 +6,7 @@ extern crate serde_json;
 extern crate serde_derive;
 extern crate rand;
 extern crate crossbeam;
-er
+
 macro_rules! printerr(
     ($($arg:tt)*) => { {use std::io::Write;
         let r = write!(&mut ::std::io::stderr(), $($arg)*);
