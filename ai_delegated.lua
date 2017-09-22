@@ -1,9 +1,4 @@
-[ai]
-  version=1071034
-  [engine]
-    name="lua"
-    code= <<--ai_delegated.cfg
---! ==============================================================
+--! ai_delegated.lua ==============================================================
 local helper = wesnoth.require("lua/helper.lua")
 
 local builtin_ai_stuff = ai --...
@@ -57,14 +52,24 @@ local calculate_and_do_one_move = function()
   if type(best_move) == "table" then
     movetype, value  = next (best_move)
   end
-  error_message (movetype, true)
-  --error_message (movetype..inspect(value), true)
+  --error_message (movetype, true)
+  error_message (movetype..inspect(value), true)
   return do_move_by_type [movetype] (value)
 end
 
 
 local our_ai = { }
-function our_ai:do_moves()
+function our_ai:evaluation()
+  local units = wesnoth.get_units ({})
+  for I, unit in ipairs (units) do
+    wesnoth.message (inspect({unit.moves, unit.attacks_left }))
+    if unit.side == wesnoth.current.side and (unit.moves >0 or unit.attacks_left >0) then
+      return 10000
+    end
+  end
+  return nil
+end
+function our_ai:execution()
   for hack=1,100 do
     if calculate_and_do_one_move() then break end
   end
@@ -81,11 +86,4 @@ end
 
 return our_ai
 --! ==============================================================
->>
-  [/engine]
-  [stage]
-    engine="lua"
-    code="(...):do_moves()"
-  [/stage]
-[/ai]
 
