@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc,Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use rand::{Rng, random};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 mod fake_wesnoth;
 mod rust_lua_shared;
@@ -595,8 +595,8 @@ fn tournament (map: Arc <fake_wesnoth::Map>, organisms: Vec<(Arc <Organism>, & '
 }
 
 use std::fs::File;
-use std::io::Read;
-fn main() {
+use std::io::{Read,BufRead};
+fn main_old() {
   let mut f = File::open("tiny_close_relation_default.json").unwrap();
   let mut s = String::new();
   f.read_to_string(&mut s).unwrap();
@@ -635,4 +635,56 @@ fn main() {
   
   println!("}},
   }}")
+}
+
+fn receive_from_lua<R: BufRead, T: Deserialize>(mut reader: R)->T {
+  loop {
+    let mut line = String::new();
+    reader.read_line (&mut line).unwrap();
+    
+    if line == "Lua_to_Rust_transfer\n" {
+      line.clear();
+      reader.read_line (&mut line).unwrap();
+      return serde_json::from_str(&line).unwrap()
+    }
+    //line.truncate(30);
+    print!("Received {}", line);
+  }
+}
+#[derive (Serialize)]
+struct Message<T> {
+  index: usize,
+  data: T
+}
+use std::cell::Cell;
+thread_local! {
+  static NEXT_SERIAL_NUMBER: Cell <usize> = Cell::new (0);
+}
+fn new_serial_number()->usize {
+  NEXT_SERIAL_NUMBER.with (| cell | {
+    let result = cell.get();
+    cell.set (result + 1);
+    result
+  })
+}
+fn send_to_lua <T: Serialize> (path: &Path, value: T) {
+  let mut file = File::create (path).unwrap();
+  serde_json::to_writer (&mut file, &Message {index: new_serial_number(), data: value}).unwrap();
+}
+
+
+use std::path::Path;
+use std::io;
+use fake_wesnoth::Player;
+fn main() {
+  let stdin = io::stdin();
+  let mut input = stdin.lock();
+  let path_arg = ::std::env::args().nth(1).unwrap();
+  let path = Path::new(&path_arg);
+  loop {
+    let state: fake_wesnoth::State = receive_from_lua(&mut input);
+    println!("\n\n\nReceived data from Wesnoth!\n\n\n");
+    let choice = naive_ai::Player::new(&*state.map).choose_move (&state);
+    send_to_lua (&path, choice);
+  }
 }
