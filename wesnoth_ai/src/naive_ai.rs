@@ -83,14 +83,14 @@ impl Player {
   
   pub fn evaluate_move (&self, state: & State, input: & fake_wesnoth::Move)->f64 {
     match input {
-      &fake_wesnoth::Move::Move {src_x, src_y, moves_left, ..} => {
+      &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
         let unit = state.get (src_x, src_y).unit.as_ref().unwrap();
-        if unit.canrecruit {return -1.0;}
+        if unit.canrecruit && !state.get_terrain_info(dst_x, dst_y).keep {return -1.0;}
         random::<f64>() - moves_left as f64
       },
       &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
         let mut attacker = state.get (src_x, src_y).unit.clone().unwrap();
-        if attacker.canrecruit && (src_x != dst_x || src_y != dst_y){return -1.0;}
+        if attacker.canrecruit && (src_x != dst_x || src_y != dst_y) && !state.get_terrain_info(dst_x, dst_y).keep {return -1.0;}
         attacker.x = dst_x;
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();

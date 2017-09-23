@@ -106,6 +106,7 @@ pub struct State {
 impl State {
   pub fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}
   pub fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [((x-1)+(y-1)*self.map.width) as usize]}
+  pub fn get_terrain_info (&self, x: i32,y: i32)->&TerrainInfo {self.map.config.terrain_info.get (&self.get(x,y).terrain).unwrap()}
   pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
@@ -132,7 +133,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       unit.y = dst_y;
       unit.moves = moves_left;
       unit.resting = false;
-      if state.map.config.terrain_info.get (&state.get (dst_x, dst_y).terrain).unwrap().village {
+      if state.get_terrain_info(dst_x, dst_y).village {
         state.get_mut (dst_x, dst_y).village_owner = unit.side + 1;
       }
       state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
