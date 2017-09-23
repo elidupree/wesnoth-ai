@@ -3,6 +3,8 @@ use rand::{random};
 use fake_wesnoth;
 use rust_lua_shared::*;
 
+
+#[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Player {
   pub unit_moves: Vec<Option <Vec<(Move, f64)>>>,
 }

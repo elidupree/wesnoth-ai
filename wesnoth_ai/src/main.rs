@@ -30,6 +30,7 @@ use serde::de::DeserializeOwned;
 mod fake_wesnoth;
 mod rust_lua_shared;
 mod naive_ai;
+mod simple_lookahead_ai;
 use rust_lua_shared::*;
 
 /// One individual "organism" shareable with Lua.
@@ -685,7 +686,9 @@ fn main() {
   loop {
     let state: fake_wesnoth::State = receive_from_lua(&mut input);
     println!("\n\n\nReceived data from Wesnoth!\n\n\n");
-    let choice = naive_ai::Player::new(&*state.map).choose_move (&state);
+    //let mut player = naive_ai::Player::new(&*state.map);
+    let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+    let choice = player.choose_move (&state);
     send_to_lua (&path, choice);
   }
 }

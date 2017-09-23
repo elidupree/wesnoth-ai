@@ -2,11 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use rand::{self, Rng};
 
+
 pub trait Player {
-  fn move_completed (&mut self, state: & State, previous: & Unit, current: & Unit);
-  fn attack_completed (&mut self, state: & State, attacker: & Unit, defender: & Unit, new_attacker: Option <&Unit>, new_defender: Option <&Unit>);
-  fn recruit_completed (&mut self, state: & State, unit: & Unit);
-  fn turn_started (&mut self, state: & State);
+  fn move_completed (&mut self, _state: & State, _previous: & Unit, _current: & Unit) {}
+  fn attack_completed (&mut self, _state: & State, _attacker: & Unit, _defender: & Unit, _new_attacker: Option <&Unit>, _new_defender: Option <&Unit>) {}
+  fn recruit_completed (&mut self, _state: & State, _unit: & Unit) {}
+  fn turn_started (&mut self, _state: & State) {}
   fn choose_move (&mut self, state: & State)->Move;
 }
      
