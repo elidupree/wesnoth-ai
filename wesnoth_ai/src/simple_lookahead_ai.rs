@@ -45,7 +45,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         total_score += scores [state.current_side];
       }
     }
-    println!("evaluated move with score {}", total_score);
+    println!("evaluated move {:?} with score {}", input, total_score);
     total_score
   }
 }

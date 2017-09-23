@@ -23,6 +23,7 @@ macro_rules! printlnerr(
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc,Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::fmt::Debug;
 use rand::{Rng, random};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -597,7 +598,7 @@ fn tournament (map: Arc <fake_wesnoth::Map>, organisms: Vec<(Arc <Organism>, & '
 }
 
 use std::fs::File;
-use std::io::{Read,BufRead};
+use std::io::{Read,BufRead,Write};
 fn main_old() {
   let mut f = File::open("tiny_close_relation_default.json").unwrap();
   let mut s = String::new();
@@ -653,7 +654,7 @@ fn receive_from_lua<R: BufRead, T: DeserializeOwned>(mut reader: R)->T {
     print!("Received {}", line);
   }
 }
-#[derive (Serialize)]
+#[derive (Serialize, Debug)]
 struct Message<T> {
   index: usize,
   data: T
@@ -669,9 +670,15 @@ fn new_serial_number()->usize {
     result
   })
 }
-fn send_to_lua <T: Serialize> (path: &Path, value: T) {
-  let mut file = File::create (path).unwrap();
-  serde_json::to_writer (&mut file, &Message {index: new_serial_number(), data: value}).unwrap();
+fn send_to_lua <T: Serialize + Debug> (path: &Path, value: T) {
+  let message = Message {index: new_serial_number(), data: value};
+  println!("Sending: {:?}", message);
+  let ready_path = path.join ("ready");
+  ::std::fs::remove_file(&ready_path).unwrap();
+  let mut file = File::create (path.join("message.json")).unwrap();
+  serde_json::to_writer (&mut file, &message).unwrap();
+  file.flush().unwrap();
+  File::create (ready_path).unwrap();
 }
 
 
@@ -685,7 +692,7 @@ fn main() {
   let path = Path::new(&path_arg);
   loop {
     let state: fake_wesnoth::State = receive_from_lua(&mut input);
-    println!("\n\n\nReceived data from Wesnoth!\n\n\n");
+    println!("Received data from Wesnoth!");
     //let mut player = naive_ai::Player::new(&*state.map);
     let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
     let choice = player.choose_move (&state);
