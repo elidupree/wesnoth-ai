@@ -5,10 +5,13 @@ authors = ["Eli Dupree <vcs@elidupree.com>"]
 
 [dependencies]
 rand = "0.3"
-serde = "0.8"
-serde_derive = "0.8"
-serde_json = "0.8"
+serde_derive = "1.0"
+serde_json = "1.0"
 crossbeam = "0.2"
+
+[dependencies.serde]
+version = "1.0"
+features = ["rc"]
 
 [profile.dev]
 opt-level = 3

@@ -24,7 +24,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc,Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use rand::{Rng, random};
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 mod fake_wesnoth;
 mod rust_lua_shared;
@@ -637,7 +638,7 @@ fn main_old() {
   }}")
 }
 
-fn receive_from_lua<R: BufRead, T: Deserialize>(mut reader: R)->T {
+fn receive_from_lua<R: BufRead, T: DeserializeOwned>(mut reader: R)->T {
   loop {
     let mut line = String::new();
     reader.read_line (&mut line).unwrap();
