@@ -39,7 +39,7 @@ local do_move_by_type = {
       builtin_ai_stuff.move(move.src_x, move.src_y, move.dst_x, move.dst_y)
     end
     -- TODO: handle invalidation by events
-    builtin_ai_stuff.attack(move.dst_x, move.dst_y, move.attack_x, move.attack_y, move.weapon and move.weapon-1)
+    builtin_ai_stuff.attack(move.dst_x, move.dst_y, move.attack_x, move.attack_y, move.weapon and move.weapon+1)
   end,
   Recruit = function(move) builtin_ai_stuff.recruit(move.unit_type, move.dst_x, move.dst_y) end,
   EndTurn = function() return true end,
