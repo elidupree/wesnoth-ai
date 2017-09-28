@@ -695,8 +695,8 @@ fn main() {
   loop {
     let state: fake_wesnoth::State = receive_from_lua(&mut input);
     println!("Received data from Wesnoth!");
-    //let mut player = naive_ai::Player::new(&*state.map);
-    let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+    let mut player = naive_ai::Player::new(&*state.map);
+    //let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
     let choice = player.choose_move (&state);
     send_to_lua (&path, choice);
   }

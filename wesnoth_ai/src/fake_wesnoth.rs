@@ -63,7 +63,7 @@ pub struct Unit {
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Location {
   pub terrain: String,
-  pub village_owner: usize,
+  pub village_owner: Option<usize>,
   pub unit: Option <Box <Unit>>,
 
 }
@@ -139,7 +139,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       unit.moves = moves_left;
       unit.resting = false;
       if state.get_terrain_info(dst_x, dst_y).village {
-        state.get_mut (dst_x, dst_y).village_owner = unit.side + 1;
+        state.get_mut (dst_x, dst_y).village_owner = Some(unit.side);
       }
       state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
       for player in players.iter_mut() {
@@ -443,7 +443,7 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
       }
       let stuff = state.get (location [0], location [1]);
       let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
-      let capture = info.village && stuff.village_owner != unit.side + 1;
+      let capture = info.village && stuff.village_owner != Some(unit.side);
       results.push ((location, if capture {0} else {moves_left}));
     }
   }
@@ -454,7 +454,7 @@ pub fn total_income (state: & State, side: usize)->i32 {
   let mut villages = 0;
   let mut upkeep = 0;
   for location in state.locations.iter() {
-    if state.map.config.terrain_info.get (&location.terrain).unwrap().village && location.village_owner == side + 1 {
+    if state.map.config.terrain_info.get (&location.terrain).unwrap().village && location.village_owner == Some(side) {
       villages += 1;
     }
     if let Some (unit) = location.unit.as_ref() {
