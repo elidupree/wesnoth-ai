@@ -254,7 +254,7 @@ pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Uni
 
 pub fn lawful_bonus (state: & State)->i32 {
   if state.time_of_day == 1 || state.time_of_day == 2 { 25 }
-  else if state.time_of_day == 4 || state.time_of_day == 5 { 25 }
+  else if state.time_of_day == 4 || state.time_of_day == 5 { -25 }
   else { 0 }
 }
 pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
