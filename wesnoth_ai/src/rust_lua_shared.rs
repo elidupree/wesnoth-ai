@@ -101,20 +101,20 @@ pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->V
   vec![
     unit.x as f64, unit.y as f64,
     unit.moves as f64, unit.attacks_left as f64,
-    unit.hitpoints as f64, (unit.max_experience - unit.experience) as f64,
+    unit.hitpoints as f64, (unit.unit_type.max_experience - unit.experience) as f64,
     neural_bool (!state.is_enemy (state.current_side, unit.side)), neural_bool (unit.canrecruit),
-    unit.max_hitpoints as f64, unit.max_moves as f64,
-    neural_bool (unit.slowed), neural_bool (unit.poisoned), neural_bool (unit.not_living),
-    unit.alignment as f64,
-    neural_bool (unit.zone_of_control),
-    unit.resistance.get ("blade").unwrap().clone() as f64,
-    unit.resistance.get ("pierce").unwrap().clone() as f64,
-    unit.resistance.get ("impact").unwrap().clone() as f64,
-    unit.resistance.get ("fire").unwrap().clone() as f64,
-    unit.resistance.get ("cold").unwrap().clone() as f64,
-    unit.resistance.get ("arcane").unwrap().clone() as f64,
-    unit.defense.get (terrain).unwrap().clone() as f64,
-    unit.movement_costs.get (terrain).unwrap().clone() as f64,
+    unit.unit_type.max_hitpoints as f64, unit.unit_type.max_moves as f64,
+    neural_bool (unit.slowed), neural_bool (unit.poisoned), neural_bool (unit.unit_type.not_living),
+    unit.unit_type.alignment as f64,
+    neural_bool (unit.unit_type.zone_of_control),
+    unit.unit_type.resistance.get ("blade").unwrap().clone() as f64,
+    unit.unit_type.resistance.get ("pierce").unwrap().clone() as f64,
+    unit.unit_type.resistance.get ("impact").unwrap().clone() as f64,
+    unit.unit_type.resistance.get ("fire").unwrap().clone() as f64,
+    unit.unit_type.resistance.get ("cold").unwrap().clone() as f64,
+    unit.unit_type.resistance.get ("arcane").unwrap().clone() as f64,
+    unit.unit_type.defense.get (terrain).unwrap().clone() as f64,
+    unit.unit_type.movement_costs.get (terrain).unwrap().clone() as f64,
     
   ]
 }
@@ -204,7 +204,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
       for adjacent in fake_wesnoth::adjacent_locations (& state.map, location.0) {
         if let Some (neighbor) = state.get (adjacent [0], adjacent [1]).unit.as_ref() {
           if state.is_enemy (unit.side, neighbor.side) {
-            for index in 0..unit.attacks.len() {
+            for index in 0..unit.unit_type.attacks.len() {
               results.push (fake_wesnoth::Move::Attack {
                 src_x: unit.x, src_y: unit.y,
                 dst_x: location.0 [0], dst_y: location.0 [1],
@@ -220,7 +220,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
   if unit.canrecruit {
     for location in recruit_hexes (state, unit) {
       for recruit in state.sides [unit.side].recruits.iter() {
-        if state.sides [unit.side].gold >= state.map.config.unit_type_examples.get (recruit).unwrap().cost {
+        if state.sides [unit.side].gold >= state.map.config.unit_type_examples.get (recruit).unwrap().unit_type.cost {
           results.push (fake_wesnoth::Move::Recruit {
             dst_x: location [0], dst_y: location [1],
             unit_type: recruit.clone(),
@@ -297,7 +297,7 @@ impl NeuralPlayer {
   
   pub fn invalidate_moves (&mut self, state: &fake_wesnoth::State, origin: [i32; 2], extra_turns: i32) {
     for (index, location) in state.locations.iter().enumerate() {
-      if location.unit.as_ref().map_or (true, | unit | fake_wesnoth::distance_between ([unit.x, unit.y], origin) <= unit.moves + 1 + extra_turns*unit.max_moves) {
+      if location.unit.as_ref().map_or (true, | unit | fake_wesnoth::distance_between ([unit.x, unit.y], origin) <= unit.moves + 1 + extra_turns*unit.unit_type.max_moves) {
         self.unit_moves [index] = None;
       }
     }

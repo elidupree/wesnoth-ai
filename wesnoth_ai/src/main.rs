@@ -180,7 +180,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box 
     leader.x = map.starting_locations [index][0];
     leader.y = map.starting_locations [index][1];
     leader.side = index;
-    leader.moves = leader.max_moves;
+    leader.moves = leader.unit_type.max_moves;
     leader.attacks_left = 1;
     leader.canrecruit = true;
     let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;

@@ -28,24 +28,13 @@ pub struct Side {
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
-pub struct Unit {
-  pub x: i32,
-  pub y: i32,
-  pub side: usize,
+pub struct UnitType {
   pub alignment: i32,
-  pub attacks_left: i32,
-  pub canrecruit: bool,
   pub cost: i32,
-  pub experience: i32,
-  pub hitpoints: i32,
   pub level: i32,
   pub max_experience: i32,
   pub max_hitpoints: i32,
   pub max_moves: i32,
-  pub moves: i32,
-  pub resting: bool,
-  pub slowed: bool,
-  pub poisoned: bool,
   pub not_living: bool,
   pub zone_of_control: bool,
   pub defense: HashMap<String, i32>,
@@ -53,6 +42,22 @@ pub struct Unit {
   pub resistance: HashMap <String, i32>,
   pub attacks: Vec<Attack>,
   // TODO: abilities
+}
+
+#[derive (Clone, Serialize, Deserialize, Debug)]
+pub struct Unit {
+  pub x: i32,
+  pub y: i32,
+  pub side: usize,
+  pub attacks_left: i32,
+  pub canrecruit: bool,
+  pub experience: i32,
+  pub hitpoints: i32,
+  pub moves: i32,
+  pub resting: bool,
+  pub slowed: bool,
+  pub poisoned: bool,
+  pub unit_type: Arc<UnitType>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
@@ -187,7 +192,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       unit.y = dst_y;
       unit.moves = 0;
       unit.attacks_left = 0;
-      state.sides [state.current_side].gold -= unit.cost;
+      state.sides [state.current_side].gold -= unit.unit_type.cost;
       state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
       for player in players.iter_mut() {
         player.recruit_completed (state, &unit);
@@ -207,10 +212,10 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
             let terrain_healing = state.map.config.terrain_info.get (&location.terrain).unwrap().healing;
             let healing = if unit.poisoned && terrain_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
             unit.resting = true;
-            unit.moves = unit.max_moves;
+            unit.moves = unit.unit_type.max_moves;
             unit.attacks_left = 1;
-            if healing > 0 && unit.hitpoints < unit.max_hitpoints {
-              unit.hitpoints = ::std::cmp::min (unit.max_hitpoints, unit.hitpoints + healing);
+            if healing > 0 && unit.hitpoints < unit.unit_type.max_hitpoints {
+              unit.hitpoints = ::std::cmp::min (unit.unit_type.max_hitpoints, unit.hitpoints + healing);
             }
             if healing < 0 && unit.hitpoints > 1{
               unit.hitpoints = ::std::cmp::max (1, unit.hitpoints + healing);
@@ -230,11 +235,11 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
 }
 
 pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->usize {
-  let attacker_attack = &attacker.attacks [weapon];
+  let attacker_attack = &attacker.unit_type.attacks [weapon];
   // pretty similar rules to Wesnoth, but is not important to get them exactly the same.
   let mut best_index = usize::max_value();
   let mut best_score = -100000000000.0;
-  for (index, attack) in defender.attacks.iter().enumerate() {
+  for (index, attack) in defender.unit_type.attacks.iter().enumerate() {
     if attack.range == attacker_attack.range {
       let stats = simulate_and_analyze (state, attacker, defender, weapon, index);
       let score = ((stats.0.death_chance - stats.1.death_chance) *100000.0) +(attacker.hitpoints as f64 - stats.0.average_hitpoints) - (defender.hitpoints as f64 - stats.1.average_hitpoints);
@@ -253,7 +258,7 @@ pub fn lawful_bonus (state: & State)->i32 {
   else { 0 }
 }
 pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
-  100 + unit.alignment*lawful_bonus (state)
+  100 + unit.unit_type.alignment*lawful_bonus (state)
 }
 
 // TODO: remove duplicate code between this and simulate_combat
@@ -270,8 +275,8 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
       unit: Box::new (unit.clone()),
       swings_left: attack.map_or (0, | attack | attack.number),
       // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
-      chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
+      damage: attack.map_or (0, | attack | attack.damage * other.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
+      chance: other.unit_type.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
     }
   };
   
@@ -282,9 +287,9 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
     return victim.unit.hitpoints >0;
   }
   
-  let attacker_attack = &attacker.attacks [weapon];
+  let attacker_attack = &attacker.unit_type.attacks [weapon];
   // TODO: actual selection of best defender attack
-  let defender_attack = defender.attacks.get (choose_defender_weapon (state, attacker, defender, weapon));
+  let defender_attack = defender.unit_type.attacks.get (choose_defender_weapon (state, attacker, defender, weapon));
   
   let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
   let mut dc = make_combatant (defender, defender_attack, attacker);
@@ -330,8 +335,8 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
       stats: CombatStats {possibilities: ::std::iter::once ((CombatantState {hitpoints: unit.hitpoints}, 1.0)).collect()},
       swings_left: attack.map_or (0, | attack | attack.number),
       // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
-      chance: other.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
+      damage: attack.map_or (0, | attack | attack.damage * other.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
+      chance: other.unit_type.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
     }
   };
   
@@ -352,9 +357,9 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
     }
   }
   
-  let attacker_attack = &attacker.attacks [attacker_weapon];
+  let attacker_attack = &attacker.unit_type.attacks [attacker_weapon];
   let defender_weapon = if defender_weapon == usize::max_value() - 1 { choose_defender_weapon (state, attacker, defender, attacker_weapon) } else {defender_weapon};
-  let defender_attack = defender.attacks.get (defender_weapon);
+  let defender_attack = defender.unit_type.attacks.get (defender_weapon);
   
   let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
   let mut dc = make_combatant (defender, defender_attack, attacker);
@@ -422,11 +427,11 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
       for adjacent in adjacent_locations (& state.map, location) {
         let stuff = state.get (adjacent [0], adjacent [1]);
-        let mut remaining = moves_left - unit.movement_costs.get (& stuff.terrain).unwrap();
+        let mut remaining = moves_left - unit.unit_type.movement_costs.get (& stuff.terrain).unwrap();
         if remaining >= 0 && !discovered.contains (&adjacent) && stuff.unit.as_ref().map_or (true, | neighbor | !state.is_enemy (unit.side, neighbor.side)) {
           if remaining >0 {
             for double_adjacent in adjacent_locations (& state.map, adjacent) {
-              if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
+              if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
                 break;
               }
@@ -454,7 +459,7 @@ pub fn total_income (state: & State, side: usize)->i32 {
     }
     if let Some (unit) = location.unit.as_ref() {
       if unit.side == side && unit.canrecruit == false {
-        upkeep += unit.level;
+        upkeep += unit.unit_type.level;
       }
     }
   }
