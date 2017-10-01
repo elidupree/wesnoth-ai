@@ -37,7 +37,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
       let mut playout_state = state.clone();
       let mut players: Vec<_> = playout_state.sides.iter().enumerate().map (| (index, _side) | (self.make_player)(&playout_state, index)).collect();
       fake_wesnoth::apply_move (&mut playout_state, &mut players, & input);
-      while playout_state.scores.is_none() && playout_state.turn < starting_turn + 40 {
+      while playout_state.scores.is_none() && playout_state.turn < starting_turn + 10 {
         let choice = players [playout_state.current_side].choose_move (& playout_state) ;
         fake_wesnoth::apply_move (&mut playout_state, &mut players, & choice);
       }

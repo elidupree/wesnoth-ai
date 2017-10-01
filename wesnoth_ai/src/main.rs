@@ -640,19 +640,26 @@ fn main_old() {
   }}")
 }
 
-fn receive_from_lua<R: BufRead, T: DeserializeOwned>(mut reader: R)->T {
-  loop {
-    let mut line = String::new();
-    reader.read_line (&mut line).unwrap();
-    
-    if line == "Lua_to_Rust_transfer\n" {
-      line.clear();
+
+use std::sync::mpsc::Sender;
+
+fn spawn_receive_from_lua_thread<T: DeserializeOwned + Send + 'static>(sender: Sender<T>) {
+  thread::spawn (move || {
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    loop {
+      let mut line = String::new();
       reader.read_line (&mut line).unwrap();
-      return serde_json::from_str(&line).unwrap()
+      
+      if line == "Lua_to_Rust_transfer\n" {
+        line.clear();
+        reader.read_line (&mut line).unwrap();
+        sender.send(serde_json::from_str(&line).unwrap());
+      }
+      //line.truncate(30);
+      print!("Received {}", line);
     }
-    //line.truncate(30);
-    print!("Received {}", line);
-  }
+  });
 }
 #[derive (Serialize, Debug)]
 struct Message<T> {
@@ -686,18 +693,16 @@ fn send_to_lua <T: Serialize + Debug> (path: &Path, value: T) {
 
 use std::path::Path;
 use std::io;
+use std::time::Duration;
 use fake_wesnoth::Player;
+
+mod gui;
 fn main() {
-  let stdin = io::stdin();
-  let mut input = stdin.lock();
+  
   let path_arg = ::std::env::args().nth(1).unwrap();
   let path = Path::new(&path_arg);
-  loop {
-    let state: fake_wesnoth::State = receive_from_lua(&mut input);
-    println!("Received data from Wesnoth!");
-    let mut player = naive_ai::Player::new(&*state.map);
-    //let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
-    let choice = player.choose_move (&state);
-    send_to_lua (&path, choice);
-  }
+  let (sender, receiver) = channel();
+  spawn_receive_from_lua_thread (sender);
+  
+  gui::main_loop(path, receiver);
 }
