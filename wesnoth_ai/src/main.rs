@@ -6,6 +6,9 @@ extern crate serde_json;
 extern crate serde_derive;
 extern crate rand;
 extern crate crossbeam;
+extern crate glium;
+#[macro_use]
+extern crate conrod;
 
 macro_rules! printerr(
     ($($arg:tt)*) => { {use std::io::Write;
@@ -654,7 +657,10 @@ fn spawn_receive_from_lua_thread<T: DeserializeOwned + Send + 'static>(sender: S
       if line == "Lua_to_Rust_transfer\n" {
         line.clear();
         reader.read_line (&mut line).unwrap();
-        sender.send(serde_json::from_str(&line).unwrap());
+        let send_result = sender.send(serde_json::from_str(&line).unwrap());
+        if send_result.is_err() {
+          return
+        }
       }
       //line.truncate(30);
       print!("Received {}", line);
