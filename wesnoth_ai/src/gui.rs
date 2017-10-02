@@ -11,20 +11,30 @@ widget_ids!(struct StateIds {
   hexes[]
 });
 
+pub fn side_color (side: usize)->conrod::color::Color {
+  match side {
+    0 => conrod::color::RED,
+    1 => conrod::color::BLUE,
+    2 => conrod::color::GREEN,
+    _=> conrod::color::WHITE,
+  }
+}
+
 pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State) {
   let size = 20f64;
   for x in 1..(state.map.width+1) {
-    let vertical_offset = if (x & 1) == 0 {size/2.0} else {0.0};
+    let vertical_offset = if (x & 1) == 0 {size} else {size/2.0};
+    let horizontal_offset = size;
     for y in 1..(state.map.height+1) {
       let rectangle_id = interface.widget_id_generator().next();
-      widget::Rectangle::outline([size, size])
-        .xy ([x as f64*size, -y as f64*size - vertical_offset])
+      widget::Rectangle::outline_styled ([size, size], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+        .xy ([(x-1) as f64*size + horizontal_offset, -(y-1) as f64*size - vertical_offset])
         .set(rectangle_id, interface);
         
       let location = state.get (x,y);
       if let Some(unit) = location.unit.as_ref() {
-        widget::Rectangle::fill([size/4.0, size])
-          .mid_left_of (rectangle_id)
+        widget::Rectangle::fill_with ([size/4.0, size*unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64], side_color (unit.side))
+          .bottom_left_of (rectangle_id)
           .set(interface.widget_id_generator().next(), interface);
       }
     }
