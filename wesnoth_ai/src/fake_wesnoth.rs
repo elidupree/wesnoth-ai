@@ -286,6 +286,17 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
     victim.unit.hitpoints -= swinger.damage;
     return victim.unit.hitpoints >0;
   }
+  fn finish (me: &mut Combatant, other: &mut Combatant) {
+    if me.unit.hitpoints > 0 {
+      let enemy_level = other.unit.unit_type.level;
+      let experience = if other.unit.hitpoints > 0 {enemy_level} else if enemy_level == 0 {4} else {enemy_level*8};
+      me.unit.experience += experience;
+      if me.unit.experience >= me.unit.unit_type.max_experience {
+        me.unit.experience -= me.unit.unit_type.max_experience;
+        me.unit.hitpoints = me.unit.unit_type.max_hitpoints;
+      }
+    }
+  }
   
   let attacker_attack = &attacker.unit_type.attacks [weapon];
   // TODO: actual selection of best defender attack
@@ -306,6 +317,8 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
   }
   //printlnerr!("{:?}, {:?}, {:?}, {:?}, ", attacker, defender, ac, dc);
   
+  finish (&mut ac, &mut dc);
+  finish (&mut dc, &mut ac);
   (
     if ac.unit.hitpoints >0 {Some (ac.unit)} else {None},
     if dc.unit.hitpoints >0 {Some (dc.unit)} else {None},
