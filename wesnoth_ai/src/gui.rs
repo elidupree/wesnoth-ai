@@ -7,6 +7,29 @@ use std::io;
 use std::time::Duration;
 use fake_wesnoth::Player;
 
+widget_ids!(struct StateIds {
+  hexes[]
+});
+
+pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State) {
+  let size = 20f64;
+  for x in 1..(state.map.width+1) {
+    let vertical_offset = if (x & 1) == 0 {size/2.0} else {0.0};
+    for y in 1..(state.map.height+1) {
+      let rectangle_id = interface.widget_id_generator().next();
+      widget::Rectangle::outline([size, size])
+        .xy ([x as f64*size, -y as f64*size - vertical_offset])
+        .set(rectangle_id, interface);
+        
+      let location = state.get (x,y);
+      if let Some(unit) = location.unit.as_ref() {
+        widget::Rectangle::fill([size/4.0, size])
+          .mid_left_of (rectangle_id)
+          .set(interface.widget_id_generator().next(), interface);
+      }
+    }
+  }
+}
 
 use conrod::{self, widget, Colorable, Positionable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
@@ -41,6 +64,8 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   'render: loop {
     if let Ok(state) = receiver.try_recv() {
       println!("Received data from Wesnoth!");
+      draw_state (&mut ui.set_widgets(), &state);
+      
       //let mut player = naive_ai::Player::new(&*state.map);
       let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
       let choice = player.choose_move (&state);
