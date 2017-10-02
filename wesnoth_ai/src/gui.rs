@@ -20,15 +20,15 @@ pub fn side_color (side: usize)->conrod::color::Color {
   }
 }
 
-pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State) {
+pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State, offsets: [f64; 2]) {
   let size = 20f64;
   for x in 1..(state.map.width+1) {
-    let vertical_offset = if (x & 1) == 0 {size} else {size/2.0};
-    let horizontal_offset = size;
+    let vertical_offset = offsets [1] - if (x & 1) == 0 {size} else {size/2.0};
+    let horizontal_offset = offsets [0] + size;
     for y in 1..(state.map.height+1) {
       let rectangle_id = interface.widget_id_generator().next();
       widget::Rectangle::outline_styled ([size, size], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
-        .xy ([(x-1) as f64*size + horizontal_offset, -(y-1) as f64*size - vertical_offset])
+        .xy ([(x-1) as f64*size + horizontal_offset, -(y-1) as f64*size + vertical_offset])
         .set(rectangle_id, interface);
         
       let location = state.get (x,y);
@@ -44,8 +44,8 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State)
 use conrod::{self, widget, Colorable, Positionable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
 pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
-  const WIDTH: u32 = 400;
-  const HEIGHT: u32 = 200;
+  const WIDTH: u32 = 600;
+  const HEIGHT: u32 = 400;
 
   let mut events_loop = glium::glutin::EventsLoop::new();
   let window = glium::glutin::WindowBuilder::new()
@@ -74,6 +74,10 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut current_state: Option <Arc<fake_wesnoth::State>> = None;
   let mut redraw = true;
   let (ai_sender, ai_receiver) = channel();
+  let mut proceeding = false;//true;
+  
+  let mut states_display = Vec::new();
+  let mut which_displayed = 0;
 
   'render: loop {
     if let Ok(state) = receiver.try_recv() {
@@ -89,9 +93,23 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let choice = player.choose_move (&state);
         let _ = sender.send (choice);
       });
+      
+      //hack 
+      states_display.clear();
+      let mut playout_state = (**current_state.as_ref().unwrap()).clone();
+      let starting_turn = playout_state.turn;
+      states_display.push (Arc::new (playout_state.clone()));
+      let mut players: Vec<_> = playout_state.sides.iter().map (| _side | Box::new (naive_ai::Player::new(&*playout_state.map)) as Box<Player>).collect();
+      while playout_state.scores.is_none() && playout_state.turn < starting_turn + 10 {
+        let choice = players [playout_state.current_side].choose_move (& playout_state) ;
+        fake_wesnoth::apply_move (&mut playout_state, &mut players, & choice);
+        states_display.push (Arc::new (playout_state.clone()));
+      }
     }
-    if let Ok(response) = ai_receiver.try_recv() {
-      send_to_lua (&path, response);
+    if proceeding {
+      if let Ok(response) = ai_receiver.try_recv() {
+        send_to_lua (&path, response);
+      }
     }
     
     events.clear();
@@ -108,6 +126,23 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
               },
               ..
             } => break 'render,
+            glium::glutin::WindowEvent::KeyboardInput {
+              input: glium::glutin::KeyboardInput {
+                virtual_keycode: Some(code),
+                state: glium::glutin::ElementState::Pressed,
+                ..
+              },
+              ..
+            } => {
+              match code {
+                glium::glutin::VirtualKeyCode::A => {proceeding = !proceeding;}
+                _=>(),
+              }
+            },
+            glium::glutin::WindowEvent::MouseMoved {position: (x,_y), ..} => {
+              which_displayed = (x/10.0) as usize;
+              redraw = true;
+            },
             _ => (),
           }
         }
@@ -131,7 +166,15 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
     if redraw {
       let ui = &mut ui.set_widgets();
       if let Some(state) = current_state.as_ref() {
-        draw_state (ui, &state);
+        draw_state (ui, &state, [0.0,0.0]);
+      }
+      if let Some(state) = states_display.get (which_displayed) {
+        draw_state (ui, &state, [0.0,100.0]);
+      }
+      for (index, state) in states_display.iter().enumerate() {
+        widget::Rectangle::outline_styled ([10.0, 20.0], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+          .xy ([-(WIDTH as f64)/2.0 + 5.0 + 10.0*index as f64, (HEIGHT as f64)/2.0-10.0])
+          .set(ui.widget_id_generator().next(), ui);
       }
       redraw = false;
     }
