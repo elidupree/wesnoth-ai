@@ -58,6 +58,12 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State,
         widget::Rectangle::fill_with ([hex_size/4.0, hex_size*unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64], side_color (unit.side))
           .bottom_left_of (rectangle_id)
           .set(interface.widget_id_generator().next(), interface);
+        widget::Rectangle::fill_with ([hex_size/8.0, hex_size*unit.experience as f64/unit.unit_type.max_experience as f64], side_color (unit.side))
+          .bottom_left_of (rectangle_id).right(hex_size/4.0)
+          .set(interface.widget_id_generator().next(), interface);
+        widget::Rectangle::fill_with ([hex_size/8.0, hex_size*unit.moves as f64/10f64], side_color (unit.side))
+          .bottom_right_of (rectangle_id)
+          .set(interface.widget_id_generator().next(), interface);
       }
     }
   }
