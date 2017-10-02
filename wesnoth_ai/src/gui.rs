@@ -21,19 +21,41 @@ pub fn side_color (side: usize)->conrod::color::Color {
 }
 
 pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State, offsets: [f64; 2]) {
-  let size = 20f64;
+  let hex_size = 40f64;
+  let meta_width = 40f64;
+  let map_size = [hex_size*state.map.width as f64, hex_size*(state.map.height as f64 + 0.5)];
+  widget::Rectangle::outline_styled (map_size, conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+    .xy ([offsets[0] + meta_width + map_size[0]/2.0, offsets[1] - map_size[1]/2.0])
+    .set(interface.widget_id_generator().next(), interface);
+  
+  let side_height = 30f64;
+  for (index, info) in state.sides.iter().enumerate() {
+    widget::Text::new(&format!("{}", info.gold))
+      .xy ([offsets[0] + meta_width/2.0, offsets[1] - side_height*(index as f64 + 0.5)])
+        .color(side_color (index))
+        .font_size(14)
+        .set(interface.widget_id_generator().next(), interface);
+  }
+  
   for x in 1..(state.map.width+1) {
-    let vertical_offset = offsets [1] - if (x & 1) == 0 {size} else {size/2.0};
-    let horizontal_offset = offsets [0] + size;
+    let vertical_offset = offsets [1] - if (x & 1) == 0 {hex_size} else {hex_size/2.0};
+    let horizontal_offset = offsets [0] + meta_width + hex_size/2.0;
     for y in 1..(state.map.height+1) {
+      let location = state.get (x,y);
       let rectangle_id = interface.widget_id_generator().next();
-      widget::Rectangle::outline_styled ([size, size], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
-        .xy ([(x-1) as f64*size + horizontal_offset, -(y-1) as f64*size + vertical_offset])
+      let owner_color = side_color (location.village_owner.unwrap_or (999));
+      widget::Rectangle::outline_styled ([hex_size, hex_size], conrod::widget::primitive::line::Style::solid().color (owner_color))
+        .xy ([(x-1) as f64*hex_size + horizontal_offset, -(y-1) as f64*hex_size + vertical_offset])
         .set(rectangle_id, interface);
         
-      let location = state.get (x,y);
+      widget::Text::new(&format!("{}", location.terrain))
+        .middle_of (rectangle_id)
+        .color(owner_color)
+        .font_size(10)
+        .set(interface.widget_id_generator().next(), interface);
+        
       if let Some(unit) = location.unit.as_ref() {
-        widget::Rectangle::fill_with ([size/4.0, size*unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64], side_color (unit.side))
+        widget::Rectangle::fill_with ([hex_size/4.0, hex_size*unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64], side_color (unit.side))
           .bottom_left_of (rectangle_id)
           .set(interface.widget_id_generator().next(), interface);
       }
@@ -169,7 +191,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         draw_state (ui, &state, [0.0,0.0]);
       }
       if let Some(state) = states_display.get (which_displayed) {
-        draw_state (ui, &state, [0.0,100.0]);
+        draw_state (ui, &state, [0.0,200.0]);
       }
       for (index, state) in states_display.iter().enumerate() {
         widget::Rectangle::outline_styled ([10.0, 20.0], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
