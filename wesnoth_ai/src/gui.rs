@@ -70,16 +70,28 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
   let image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
   let mut events = Vec::new();
+  
+  let mut current_state: Option <Arc<fake_wesnoth::State>> = None;
+  let mut redraw = true;
+  let (ai_sender, ai_receiver) = channel();
 
   'render: loop {
     if let Ok(state) = receiver.try_recv() {
       println!("Received data from Wesnoth!");
-      draw_state (&mut ui.set_widgets(), &state);
+      let state = Arc::new(state);
+      current_state = Some(state.clone());
+      redraw = true;
+      let sender = ai_sender.clone();
       
-      //let mut player = naive_ai::Player::new(&*state.map);
-      let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
-      let choice = player.choose_move (&state);
-      send_to_lua (&path, choice);
+      thread::spawn (move | | {
+        //let mut player = naive_ai::Player::new(&*state.map);
+        let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+        let choice = player.choose_move (&state);
+        let _ = sender.send (choice);
+      });
+    }
+    if let Ok(response) = ai_receiver.try_recv() {
+      send_to_lua (&path, response);
     }
     
     events.clear();
@@ -107,14 +119,22 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         Some(input) => input,
       };
       ui.handle_event(input);
-      let ui = &mut ui.set_widgets();
+      /*let ui = &mut ui.set_widgets();
       
       widget::Text::new("Hello World!")
         .middle_of(ui.window)
         .color(conrod::color::WHITE)
         .font_size(32)
-        .set(ids.text, ui);
+        .set(ids.text, ui);*/
     };
+    
+    if redraw {
+      let ui = &mut ui.set_widgets();
+      if let Some(state) = current_state.as_ref() {
+        draw_state (ui, &state);
+      }
+      redraw = false;
+    }
     
     if let Some(primitives) = ui.draw_if_changed() {
       renderer.fill(&display, primitives, &image_map);
