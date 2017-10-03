@@ -53,7 +53,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
 
 impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<LookaheadPlayer> {
   pub fn new(make_player: LookaheadPlayer)->Self where Self: Sized {Player{make_player: make_player, last_root: None}}
-  pub fn evaluate_state (&self, state: & State)->f64 {
+  pub fn evaluate_state (&self, state: & State)->Vec<f64> {
     let mut total_score = 0f64;
     let starting_turn = state.turn;
     
@@ -64,13 +64,13 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
       fake_wesnoth::apply_move (&mut playout_state, &mut players, & choice);
     }
     if let Some(scores) = playout_state.scores {
-      total_score += scores [state.current_side];
+      return scores;
     }
-    total_score
+    vec![0.0; state.sides.len()]
   }
   
-  fn step_into_node (&self, node: &mut Node)->f64 {
-    let score = if node.visits == 0 {
+  fn step_into_node (&self, node: &mut Node)->Vec<f64> {
+    let scores = if node.visits == 0 {
       self.evaluate_state (&node.state)
     }
     else {
@@ -111,18 +111,18 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         rand::thread_rng().choose_mut(&mut choice.determined_outcomes).unwrap()
       };
 
-      let score = self.step_into_node (next_node);
+      let scores = self.step_into_node (next_node);
       
-      choice.total_score += score;
+      choice.total_score += scores[node.state.current_side];
       choice.visits += 1;
       
-      score
+      scores
     };
     
-    node.total_score += score;
+    node.total_score += scores[node.state.current_side];
     node.visits += 1;
     
-    score
+    scores
   }
 }
 
