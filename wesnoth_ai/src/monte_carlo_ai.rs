@@ -38,7 +38,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
       total_score: 0.0,
       moves: Vec::new(),
     };
-    for _ in 0..500 {
+    for _ in 0..3500 {
       self.step_into_node (&mut root);
     }
     

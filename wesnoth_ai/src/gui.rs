@@ -74,6 +74,7 @@ struct DisplayedState {
   depth: usize,
   size: [f64; 2],
   state: Arc <fake_wesnoth::State>,
+  text: String,
 }
 
 use conrod::{self, widget, Colorable, Positionable, Widget};
@@ -164,18 +165,22 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
           let mut prior_visits = Cell::new(0);
           let node_visits = node.visits;
           next_frontier.extend(
-            node.moves.into_iter().flat_map(|a| {
+            node.moves.into_iter()
+            .flat_map(|a| {
               a.determined_outcomes.into_iter().map(|out| {
                 let out_size = [size[0] + diff*prior_visits.get() as f64/node_visits as f64,
                    size[0] + diff*(prior_visits.get()+out.visits) as f64/node_visits as f64];
                 prior_visits.set(prior_visits.get() + out.visits);
                 (out, out_size)
               })
-            }));
+            })
+            .filter(|&(_, size)| size[1]-size[0] > 0.001)
+          );
           states_display.push (DisplayedState {
             depth: depth,
             size: size,
             state: node.state.clone(),
+            text: format!("{:.2}", node.total_score/node.visits as f64),
           });
         }
         depth += 1;
@@ -250,13 +255,19 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let state = &displayed_state.state;
         
         let diff = displayed_state.size[1] - displayed_state.size[0];
+        let pos = [-(WIDTH as f64)/2.0 + depth_width/2.0 + depth_width*displayed_state.depth as f64, -(HEIGHT as f64)/2.0 + HEIGHT as f64 * (displayed_state.size[0] + diff/2.0)];
         if index == which_displayed {
           widget::Rectangle::fill_with ([depth_width, HEIGHT as f64*diff], side_color (state.current_side))
         }
         else {
           widget::Rectangle::outline_styled ([depth_width, HEIGHT as f64*diff], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
         }
-          .xy ([-(WIDTH as f64)/2.0 + depth_width/2.0 + depth_width*displayed_state.depth as f64, -(HEIGHT as f64)/2.0 + HEIGHT as f64 * (displayed_state.size[0] + diff/2.0)])
+          .xy (pos)
+          .set(ui.widget_id_generator().next(), ui);
+        widget::Text::new(&displayed_state.text)
+          .color(side_color (state.current_side))
+          .font_size(12)
+          .xy (pos)
           .set(ui.widget_id_generator().next(), ui);
       }
       redraw = false;
