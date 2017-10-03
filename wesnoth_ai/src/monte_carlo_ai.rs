@@ -56,17 +56,18 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
   pub fn evaluate_state (&self, state: & State)->Vec<f64> {
     let mut total_score = 0f64;
     let starting_turn = state.turn;
+    let starting_side = state.current_side;
     
     let mut playout_state = state.clone();
     let mut players: Vec<_> = playout_state.sides.iter().enumerate().map (| (index, _side) | (self.make_player)(&playout_state, index)).collect();
-    while playout_state.scores.is_none() && playout_state.turn < starting_turn + 10 {
+    while playout_state.scores.is_none() && !(playout_state.current_side == state.current_side && playout_state.turn == starting_turn + 2) {
       let choice = players [playout_state.current_side].choose_move (& playout_state) ;
       fake_wesnoth::apply_move (&mut playout_state, &mut players, & choice);
     }
     if let Some(scores) = playout_state.scores {
       return scores;
     }
-    vec![0.0; state.sides.len()]
+    ::naive_ai::evaluate_state(&playout_state) //vec![0.0; state.sides.len()]
   }
   
   fn step_into_node (&self, node: &mut Node)->Vec<f64> {
@@ -88,14 +89,15 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
           }
         }).collect();
       }
-      let log_visits = 2.0*(node.visits as f64).ln();
+      let c = 0.2; //2.0;
+      let c_log_visits = c*(node.visits as f64).ln();
       let priority_state = node.state.clone();
       let priority = | proposed: &ProposedMove | {
         if proposed.visits == 0 {
           10000.0 + ::naive_ai::evaluate_move (&priority_state, &proposed.action).atan()
         }
         else {
-          proposed.total_score/proposed.visits as f64 + (log_visits/(proposed.visits as f64)).sqrt()
+          proposed.total_score/proposed.visits as f64 + (c_log_visits/(proposed.visits as f64)).sqrt()
         }
       };
       let choice = node.moves.iter_mut()

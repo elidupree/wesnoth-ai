@@ -145,4 +145,29 @@ impl Player {
     }
   }
 
+  
+  pub fn evaluate_state (state: & State)->Vec<f64> {
+    let mut ally_values = vec![0.0; state.sides.len()];
+    let mut enemy_values = vec![0.0; state.sides.len()];
+    for location in state.locations.iter() {
+      if let Some(unit) = location.unit.as_ref() {
+        let constant_value = unit.unit_type.cost as f64 + if unit.canrecruit {1000.0} else {0.0};
+        let value = constant_value*(1.0 + unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64);
+        for index in 0..state.sides.len() {
+          if state.is_enemy (unit.side, index) {
+            enemy_values[index] += value;
+          }
+          else {
+            ally_values[index] += value;
+          }
+        }
+      }
+    }
+    (0..state.sides.len()).map(|side| {
+      let ally = ally_values[side];
+      let enemy = enemy_values[side];
+      (ally-enemy)/(ally+enemy)
+    }).collect()
+  }
+
 
