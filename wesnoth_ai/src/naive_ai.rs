@@ -47,7 +47,7 @@ impl Player {
       if let Some (unit) = location.unit.as_ref() {
         if self.unit_moves [index].is_none() && unit.side == state.current_side {
           self.unit_moves [index] = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
-            let evaluation = self.evaluate_move (state, &action);
+            let evaluation = evaluate_move (state, &action);
             (action, evaluation)
           }).collect());
         }
@@ -75,13 +75,14 @@ impl Player {
   
     results
   }
+}
   
-  fn stats_badness (&self, unit: & Unit, stats: & fake_wesnoth::AnalyzedStats)->f64 {
+  fn stats_badness (unit: & Unit, stats: & fake_wesnoth::AnalyzedStats)->f64 {
     (unit.hitpoints as f64 - stats.average_hitpoints)*(if unit.canrecruit {2.0} else {1.0})
     + stats.death_chance*(if unit.canrecruit {1000.0} else {50.0})
   }
   
-  pub fn evaluate_unit_position (&self, state: & State, unit: &Unit, x: i32, y: i32)->f64 {
+  pub fn evaluate_unit_position (state: & State, unit: &Unit, x: i32, y: i32)->f64 {
     let mut result = 0.0;
     let location = state.get(x, y);
     let terrain_info = state.map.config.terrain_info.get (&location.terrain).unwrap();
@@ -98,13 +99,13 @@ impl Player {
     result
   }
   
-  pub fn evaluate_move (&self, state: & State, input: & fake_wesnoth::Move)->f64 {
+  pub fn evaluate_move (state: & State, input: & fake_wesnoth::Move)->f64 {
     match input {
       &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
         let unit = state.get (src_x, src_y).unit.as_ref().unwrap();
         let mut result =
-          self.evaluate_unit_position (state, unit, dst_x, dst_y)
-          - self.evaluate_unit_position (state, unit, src_x, src_y)
+          evaluate_unit_position (state, unit, dst_x, dst_y)
+          - evaluate_unit_position (state, unit, src_x, src_y)
           + (random::<f64>() - moves_left as f64) / 100.0;
         let destination = state.get(dst_x, dst_y);
         let terrain_info = state.map.config.terrain_info.get (&destination.terrain).unwrap();
@@ -130,7 +131,7 @@ impl Player {
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
         let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, usize::max_value() - 1);
-        self.evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}) + random::<f64>() + self.stats_badness (&defender, &stats.1) - self.stats_badness (&attacker, &stats.0)
+        evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}) + random::<f64>() + stats_badness (&defender, &stats.1) - stats_badness (&attacker, &stats.0)
       }
       &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
         let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
@@ -140,8 +141,8 @@ impl Player {
       
         random::<f64>()+100.0
       },
-      &fake_wesnoth::Move::EndTurn => unreachable!(),
+      &fake_wesnoth::Move::EndTurn => 0.0,
     }
   }
-}
+
 

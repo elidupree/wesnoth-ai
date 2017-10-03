@@ -37,7 +37,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
       total_score: 0.0,
       moves: Vec::new(),
     };
-    for _ in 0..100 {
+    for _ in 0..500 {
       self.step_into_node (&mut root);
     }
     root.moves.iter()
@@ -81,11 +81,19 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         }).collect();
       }
       let log_visits = 2.0*(node.visits as f64).ln();
-      let priority = | proposed: &ProposedMove | proposed.total_score/proposed.visits as f64 + (log_visits/(proposed.visits as f64)).sqrt();
+      let priority_state = node.state.clone();
+      let priority = | proposed: &ProposedMove | {
+        if proposed.visits == 0 {
+          10000.0 + ::naive_ai::evaluate_move (&priority_state, &proposed.action).atan()
+        }
+        else {
+          proposed.total_score/proposed.visits as f64 + (log_visits/(proposed.visits as f64)).sqrt()
+        }
+      };
       let choice = node.moves.iter_mut()
           .max_by (|a,b| priority(a).partial_cmp(&priority(b)).unwrap())
           .unwrap();
-      let next_node = if choice.determined_outcomes.is_empty() || (match choice.action {fake_wesnoth::Move::Attack{..}=>true,_=>false} && choice.visits > (1>>choice.determined_outcomes.len())) {
+      let next_node = if choice.determined_outcomes.is_empty() || (match choice.action {fake_wesnoth::Move::Attack{..}=>true,_=>false} && choice.visits > (1<<choice.determined_outcomes.len())) {
         let mut state_after = (*node.state).clone();
         fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & choice.action);
         
