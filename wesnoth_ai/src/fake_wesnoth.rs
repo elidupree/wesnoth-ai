@@ -476,5 +476,5 @@ pub fn total_income (state: & State, side: usize)->i32 {
       }
     }
   }
-  villages*2 - ::std::cmp::max (0, upkeep - villages)
+  2 + villages*2 - ::std::cmp::max (0, upkeep - villages)
 }
