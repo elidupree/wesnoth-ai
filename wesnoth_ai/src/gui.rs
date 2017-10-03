@@ -115,6 +115,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   
   let mut states_display = Vec::new();
   let mut which_displayed = 0;
+  let mut focused = 0;
   let depth_width = 30.0;
 
   'render: loop {
@@ -174,7 +175,6 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
                 (out, out_size)
               })
             })
-            .filter(|&(_, size)| size[1]-size[0] > 0.001)
           );
           states_display.push (DisplayedState {
             depth: depth,
@@ -223,6 +223,10 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
                 .position(|a|a.depth == depth && a.size[0] < height && a.size[1] > height).unwrap_or(99999999);
               redraw = true;
             },
+            glium::glutin::WindowEvent::MouseInput {state: glium::glutin::ElementState::Pressed, ..} => {
+              focused = which_displayed;
+              redraw = true;
+            },
             _ => (),
           }
         }
@@ -251,16 +255,24 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       if let Some(displayed_state) = states_display.get(which_displayed) {
         draw_state (ui, &displayed_state.state, [0.0,200.0]);
       }
+      if focused >= states_display.len() {focused = 0;}
       for (index, displayed_state) in states_display.iter().enumerate() {
+        let focused = states_display.get (focused).unwrap();
+        if displayed_state.size [0] > focused.size[1] || displayed_state.size [1] < focused.size[0] { continue; }
+        let focused_diff = focused.size [1] - focused.size [0];
         let state = &displayed_state.state;
         
         let diff = displayed_state.size[1] - displayed_state.size[0];
-        let pos = [-(WIDTH as f64)/2.0 + depth_width/2.0 + depth_width*displayed_state.depth as f64, -(HEIGHT as f64)/2.0 + HEIGHT as f64 * (displayed_state.size[0] + diff/2.0)];
+        if diff < focused_diff * 0.01 { continue; }
+        let pos = [
+          -(WIDTH as f64)/2.0 + depth_width/2.0 + depth_width*displayed_state.depth as f64,
+          -(HEIGHT as f64)/2.0 + HEIGHT as f64 * (displayed_state.size[0]-focused.size[0] + diff/2.0)/focused_diff
+        ];
         if index == which_displayed {
-          widget::Rectangle::fill_with ([depth_width, HEIGHT as f64*diff], side_color (state.current_side))
+          widget::Rectangle::fill_with ([depth_width, HEIGHT as f64*diff/focused_diff], side_color (state.current_side))
         }
         else {
-          widget::Rectangle::outline_styled ([depth_width, HEIGHT as f64*diff], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+          widget::Rectangle::outline_styled ([depth_width, HEIGHT as f64*diff/focused_diff], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
         }
           .xy (pos)
           .set(ui.widget_id_generator().next(), ui);
