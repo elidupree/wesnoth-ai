@@ -117,7 +117,8 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       
       thread::spawn (move | | {
         //let mut player = naive_ai::Player::new(&*state.map);
-        let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+        //let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+        let mut player = monte_carlo_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
         let choice = player.choose_move (&state);
         let _ = sender.send (choice);
       });

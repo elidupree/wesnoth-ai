@@ -35,6 +35,7 @@ mod fake_wesnoth;
 mod rust_lua_shared;
 mod naive_ai;
 mod simple_lookahead_ai;
+mod monte_carlo_ai;
 use rust_lua_shared::*;
 
 /// One individual "organism" shareable with Lua.
