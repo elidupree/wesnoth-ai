@@ -69,11 +69,18 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State,
   }
 }
 
+#[derive (Clone)]
+struct DisplayedState {
+  depth: usize,
+  size: [f64; 2],
+  state: Arc <fake_wesnoth::State>,
+}
+
 use conrod::{self, widget, Colorable, Positionable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
 pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   const WIDTH: u32 = 600;
-  const HEIGHT: u32 = 400;
+  const HEIGHT: u32 = 800;
 
   let mut events_loop = glium::glutin::EventsLoop::new();
   let window = glium::glutin::WindowBuilder::new()
@@ -102,10 +109,12 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut current_state: Option <Arc<fake_wesnoth::State>> = None;
   let mut redraw = true;
   let (ai_sender, ai_receiver) = channel();
+  let (tree_sender, tree_receiver) = channel();
   let mut proceeding = false;//true;
   
   let mut states_display = Vec::new();
   let mut which_displayed = 0;
+  let depth_width = 30.0;
 
   'render: loop {
     if let Ok(state) = receiver.try_recv() {
@@ -114,6 +123,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       current_state = Some(state.clone());
       redraw = true;
       let sender = ai_sender.clone();
+      let tree_sender = tree_sender.clone();
       
       thread::spawn (move | | {
         //let mut player = naive_ai::Player::new(&*state.map);
@@ -121,10 +131,11 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let mut player = monte_carlo_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
         let choice = player.choose_move (&state);
         let _ = sender.send (choice);
+        let _ = tree_sender.send (player.last_root.unwrap());
       });
       
       //hack 
-      states_display.clear();
+      /*states_display.clear();
       let mut playout_state = (**current_state.as_ref().unwrap()).clone();
       let starting_turn = playout_state.turn;
       states_display.push (Arc::new (playout_state.clone()));
@@ -133,11 +144,41 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let choice = players [playout_state.current_side].choose_move (& playout_state) ;
         fake_wesnoth::apply_move (&mut playout_state, &mut players, & choice);
         states_display.push (Arc::new (playout_state.clone()));
-      }
+      }*/
     }
     if proceeding {
       if let Ok(response) = ai_receiver.try_recv() {
         send_to_lua (&path, response);
+      }
+    }
+    if let Ok(root) = tree_receiver.try_recv() {
+      //let layers = Vec::new();
+      let mut frontier = vec![(root, [0.0, 1.0])];
+      let mut depth = 0;
+      while !frontier.is_empty() {
+        let mut next_frontier = Vec::new();
+        for (mut node, size) in frontier {
+          let diff = size[1]-size[0];
+          node.moves.sort_by_key (|a| a.visits);
+          let mut prior_visits = Cell::new(0);
+          let node_visits = node.visits;
+          next_frontier.extend(
+            node.moves.into_iter().flat_map(|a| {
+              a.determined_outcomes.into_iter().map(|out| {
+                let out_size = [size[0] + diff*prior_visits.get() as f64/node_visits as f64,
+                   size[0] + diff*(prior_visits.get()+out.visits) as f64/node_visits as f64];
+                prior_visits.set(prior_visits.get() + out.visits);
+                (out, out_size)
+              })
+            }));
+          states_display.push (DisplayedState {
+            depth: depth,
+            size: size,
+            state: node.state.clone(),
+          });
+        }
+        depth += 1;
+        frontier = next_frontier;
       }
     }
     
@@ -168,8 +209,11 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
                 _=>(),
               }
             },
-            glium::glutin::WindowEvent::MouseMoved {position: (x,_y), ..} => {
-              which_displayed = (x/10.0) as usize;
+            glium::glutin::WindowEvent::MouseMoved {position: (x,y), ..} => {
+              let depth = (x/depth_width) as usize;
+              let height = 1.0-(y/HEIGHT as f64);
+              which_displayed = states_display.iter()
+                .position(|a|a.depth == depth && a.size[0] < height && a.size[1] > height).unwrap_or(99999999);
               redraw = true;
             },
             _ => (),
@@ -197,12 +241,20 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       if let Some(state) = current_state.as_ref() {
         draw_state (ui, &state, [0.0,0.0]);
       }
-      if let Some(state) = states_display.get (which_displayed) {
-        draw_state (ui, &state, [0.0,200.0]);
+      if let Some(displayed_state) = states_display.get(which_displayed) {
+        draw_state (ui, &displayed_state.state, [0.0,200.0]);
       }
-      for (index, state) in states_display.iter().enumerate() {
-        widget::Rectangle::outline_styled ([10.0, 20.0], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
-          .xy ([-(WIDTH as f64)/2.0 + 5.0 + 10.0*index as f64, (HEIGHT as f64)/2.0-10.0])
+      for (index, displayed_state) in states_display.iter().enumerate() {
+        let state = &displayed_state.state;
+        
+        let diff = displayed_state.size[1] - displayed_state.size[0];
+        if index == which_displayed {
+          widget::Rectangle::fill_with ([depth_width, HEIGHT as f64*diff], side_color (state.current_side))
+        }
+        else {
+          widget::Rectangle::outline_styled ([depth_width, HEIGHT as f64*diff], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+        }
+          .xy ([-(WIDTH as f64)/2.0 + depth_width/2.0 + depth_width*displayed_state.depth as f64, -(HEIGHT as f64)/2.0 + HEIGHT as f64 * (displayed_state.size[0] + diff/2.0)])
           .set(ui.widget_id_generator().next(), ui);
       }
       redraw = false;

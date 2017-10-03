@@ -9,22 +9,23 @@ use rust_lua_shared::*;
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Player <LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> {
   make_player: LookaheadPlayer,
+  pub last_root: Option <Node>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
-struct Node {
-  state: Arc<State>,
-  visits: i32,
-  total_score: f64,
-  moves: Vec<ProposedMove>,
+pub struct Node {
+  pub state: Arc<State>,
+  pub visits: i32,
+  pub total_score: f64,
+  pub moves: Vec<ProposedMove>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
-struct ProposedMove {
-  action: Move,
-  visits: i32,
-  total_score: f64,
-  determined_outcomes: Vec<Node>,
+pub struct ProposedMove {
+  pub action: Move,
+  pub visits: i32,
+  pub total_score: f64,
+  pub determined_outcomes: Vec<Node>,
 }
 
 use fake_wesnoth::{State, Unit, Move};
@@ -40,14 +41,18 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
     for _ in 0..500 {
       self.step_into_node (&mut root);
     }
-    root.moves.iter()
+    
+    let result = root.moves.iter()
       .max_by_key (|a| a.visits)
-      .unwrap().action.clone()
+      .unwrap().action.clone();
+    
+    self.last_root = Some(root);
+    result
   }
 }
 
 impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<LookaheadPlayer> {
-  pub fn new(make_player: LookaheadPlayer)->Self where Self: Sized {Player{make_player: make_player}}
+  pub fn new(make_player: LookaheadPlayer)->Self where Self: Sized {Player{make_player: make_player, last_root: None}}
   pub fn evaluate_state (&self, state: & State)->f64 {
     let mut total_score = 0f64;
     let starting_turn = state.turn;
