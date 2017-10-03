@@ -65,33 +65,39 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
   
   
   pub fn step (&mut self) {
-    let mut node = self.root;
-    while !node.moves.is_empty() {
-      let log_visits = 2.0*(node.visits as f64).ln();
-      let priority = | proposed | proposed.total_score/proposed.visits as f64 + (log_visits/(proposed.visits as f64)).sqrt();
-      let choice = node.moves.iter()
-          .max_by (|a,b| priority(a).cmp(priority(b)))
-          .unwrap().action
-      
-    }
-    node.moves = node.state.locations.iter()
+    let mut node = &mut self.root;
+    while node.visits > 0 {
+      if node.moves.is_empty() { node.moves = node.state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
         .filter(|unit| unit.side == state.current_side)
         .flat_map (|unit| possible_unit_moves (state, unit).into_iter())
         .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
         .map(| action | {
-          
           ProposedMove {
-            action: action, total_score: score, visits: 0, determined_outcomes: Vec::new(),
+            action: action, total_score: 0.0, visits: 0, determined_outcomes: Vec::new(),
           }
         });
-        
+      }
+      let log_visits = 2.0*(node.visits as f64).ln();
+      let priority = | proposed | proposed.total_score/proposed.visits as f64 + (log_visits/(proposed.visits as f64)).sqrt();
+      let choice = node.moves.iter()
+          .max_by (|a,b| priority(a).cmp(priority(b)))
+          .unwrap()
+      if choice.determined_outcomes.is_empty() || (match choice.action {Attack{..}=>true,_=>false} && choice.determined_outcomes.len()) {
         let mut state_after = node.state.clone();
-          fake_wesnoth::apply_move (&mut state_after, None, & action);
-          let score = self.evaluate (state_after);
-          Node {
-                        state: state_after, visits: 1, moves: Vec::new(),
-                      }
+        fake_wesnoth::apply_move (&mut state_after, None, & action);
+        
+        choice.determined_outcomes.push(Node {
+          state: state_after, visits: 0, moves: Vec::new(),
+        });
+        node = choice.determined_outcomes.last_mut();
+      }
+      else {
+        node = rand::thread_rng()::choose(choice.determined_outcomes).unwrap()
+      }
+    }
+    
+    let score = self.evaluate_state (&node.state);
     
   }
 }
