@@ -153,6 +153,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
     }
     if let Ok(root) = tree_receiver.try_recv() {
       //let layers = Vec::new();
+      states_display.clear();
       let mut frontier = vec![(root, [0.0, 1.0])];
       let mut depth = 0;
       while !frontier.is_empty() {
@@ -180,6 +181,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         depth += 1;
         frontier = next_frontier;
       }
+      redraw = true;
     }
     
     events.clear();
