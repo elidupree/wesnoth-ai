@@ -70,7 +70,10 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
   }
   
   fn step_into_node (&self, node: &mut Node)->Vec<f64> {
-    let scores = if node.visits == 0 {
+    let scores = if let Some(scores) = node.state.scores.clone() {
+      scores
+    }
+    else if node.visits == 0 {
       self.evaluate_state (&node.state)
     }
     else {
