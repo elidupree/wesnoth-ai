@@ -1,6 +1,8 @@
 use rand::{self, random, Rng};
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::cell::RefCell;
 
 use fake_wesnoth;
 use rust_lua_shared::*;
@@ -18,6 +20,24 @@ pub struct Node {
   pub visits: i32,
   pub total_score: f64,
   pub moves: Vec<ProposedMove>,
+  pub turn: Arc<TurnGlobals>,
+}
+
+#[derive (Clone, Serialize, Deserialize, Debug)]
+pub struct RaveScore {
+  pub visits: i32,
+  pub total_score: f64,
+}
+
+#[derive (Serialize, Deserialize, Debug, Default)]
+pub struct TurnGlobals {
+  pub rave_scores: Mutex<HashMap<fake_wesnoth::Move, RaveScore>>,
+}
+
+#[derive (Clone, Serialize, Deserialize, Debug)]
+pub struct TreeGlobals {
+  pub starting_turn: i32,
+  pub starting_side: usize,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
@@ -37,9 +57,14 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
       visits: 0,
       total_score: 0.0,
       moves: Vec::new(),
+      turn: Arc::default(),
+    };
+    let mut globals = TreeGlobals {
+      starting_turn: state.turn,
+      starting_side: state.current_side,
     };
     for _ in 0..3500 {
-      self.step_into_node (&mut root);
+      self.step_into_node (&mut globals, &mut root);
     }
     
     let result = root.moves.iter()
@@ -53,7 +78,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
 
 impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<LookaheadPlayer> {
   pub fn new(make_player: LookaheadPlayer)->Self where Self: Sized {Player{make_player: make_player, last_root: None}}
-  pub fn evaluate_state (&self, state: & State)->Vec<f64> {
+  /*pub fn evaluate_state (&self, state: & State)->Vec<f64> {
     let mut total_score = 0f64;
     let starting_turn = state.turn;
     let starting_side = state.current_side;
@@ -68,14 +93,17 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
       return scores;
     }
     ::naive_ai::evaluate_state(&playout_state) //vec![0.0; state.sides.len()]
-  }
+  }*/
   
-  fn step_into_node (&self, node: &mut Node)->Vec<f64> {
+  fn step_into_node (&self, globals: &mut TreeGlobals, node: &mut Node)->Vec<f64> {
     let scores = if let Some(scores) = node.state.scores.clone() {
       scores
     }
-    else if node.visits == 0 {
+    /*else if node.visits == 0 {
       self.evaluate_state (&node.state)
+    }*/
+    else if node.state.current_side == globals.starting_side && node.state.turn == globals.starting_turn + 2 {
+      ::naive_ai::evaluate_state(&node.state)
     }
     else {
       if node.moves.is_empty() { node.moves = node.state.locations.iter()
@@ -92,13 +120,27 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
       let c = 0.2; //2.0;
       let c_log_visits = c*(node.visits as f64).ln();
       let priority_state = node.state.clone();
+      let priority_turn = node.turn.clone();
       let priority = | proposed: &ProposedMove | {
-        if proposed.visits == 0 {
-          10000.0 + ::naive_ai::evaluate_move (&priority_state, &proposed.action).atan()
+        let rave_score = priority_turn.rave_scores.lock().unwrap().get(&proposed.action).cloned().unwrap_or(RaveScore { visits: 0, total_score: 0.0, });
+        let naive_weight = 0.000001;
+        let rave_weight = rave_score.visits as f64;
+        let exact_weight = (proposed.visits*proposed.visits) as f64;
+        let total_weight = naive_weight + rave_weight + exact_weight;
+               
+        let uncertainty_bonus = if proposed.visits == 0 { 10000.0 }
+          else { (c_log_visits/(proposed.visits as f64)).sqrt() };
+        
+        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action);
+        if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
+        let mut total_score = naive_score*(naive_weight/total_weight);
+        if rave_score.visits > 0 {
+          total_score += (rave_score.total_score/rave_score.visits as f64) * (rave_weight/total_weight);
         }
-        else {
-          proposed.total_score/proposed.visits as f64 + (c_log_visits/(proposed.visits as f64)).sqrt()
+        if proposed.visits > 0 {
+          total_score += (proposed.total_score/proposed.visits as f64) * (exact_weight/total_weight);
         }
+        total_score + uncertainty_bonus
       };
       let choice = node.moves.iter_mut()
           .max_by (|a,b| priority(a).partial_cmp(&priority(b)).unwrap())
@@ -108,7 +150,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & choice.action);
         
         choice.determined_outcomes.push(Node {
-          state: Arc::new(state_after), visits: 0, total_score: 0.0, moves: Vec::new(),
+          state: Arc::new(state_after), visits: 0, total_score: 0.0, moves: Vec::new(), turn: match choice.action {fake_wesnoth::Move::EndTurn=>Arc::default(),_=>node.turn.clone()} ,
         });
         choice.determined_outcomes.last_mut().unwrap()
       }
@@ -116,10 +158,16 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         rand::thread_rng().choose_mut(&mut choice.determined_outcomes).unwrap()
       };
 
-      let scores = self.step_into_node (next_node);
+      let scores = self.step_into_node (globals, next_node);
       
       choice.total_score += scores[node.state.current_side];
       choice.visits += 1;
+      if match choice.action {fake_wesnoth::Move::EndTurn=>false,_=>true} {
+        let mut guard = node.turn.rave_scores.lock().unwrap();
+        let rave_score = guard.entry (choice.action.clone()).or_insert (RaveScore { visits: 0, total_score: 0.0, });
+        rave_score.total_score += scores[node.state.current_side];
+        rave_score.visits += 1;
+      }
       
       scores
     };

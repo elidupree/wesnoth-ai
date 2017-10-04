@@ -115,7 +115,7 @@ impl State {
   pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
 }
 
-#[derive (Clone, Serialize, Deserialize, Debug)]
+#[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum Move {
   Move {
     src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, moves_left: i32,
