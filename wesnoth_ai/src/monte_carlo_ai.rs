@@ -118,7 +118,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         }).collect();
       }
       let c = 0.2; //2.0;
-      let c_log_visits = c*(node.visits as f64).ln();
+      let c_log_visits = c*((node.visits+1) as f64).ln();
       let priority_state = node.state.clone();
       let priority_turn = node.turn.clone();
       let priority = | proposed: &ProposedMove | {
@@ -128,8 +128,11 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
         let exact_weight = (proposed.visits*proposed.visits) as f64;
         let total_weight = naive_weight + rave_weight + exact_weight;
                
-        let uncertainty_bonus = if proposed.visits == 0 { 10000.0 }
-          else { (c_log_visits/(proposed.visits as f64)).sqrt() };
+        let uncertainty_bonus = if rave_score.visits + proposed.visits == 0 { 100000.0 }
+          else { (c_log_visits/(
+            rave_score.visits as f64/2.0
+            + proposed.visits as f64
+          )).sqrt() };
         
         let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action);
         if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
