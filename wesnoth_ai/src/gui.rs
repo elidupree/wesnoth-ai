@@ -180,7 +180,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             depth: depth,
             size: size,
             state: node.state.clone(),
-            text: format!("{:.2}", node.total_score/node.visits as f64),
+            text: format!("{:.2}\n{}", node.total_score/node.visits as f64, node.visits),
           });
         }
         depth += 1;
@@ -218,7 +218,13 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             },
             glium::glutin::WindowEvent::MouseMoved {position: (x,y), ..} => {
               let depth = (x/depth_width) as usize;
-              let height = 1.0-(y/HEIGHT as f64);
+              let mut height = 1.0-(y/HEIGHT as f64);
+              
+              if let Some(focused) = states_display.get (focused) {
+                let focused_diff = focused.size [1] - focused.size [0];
+                height = focused.size [0] + focused_diff*height;
+              }
+              
               which_displayed = states_display.iter()
                 .position(|a|a.depth == depth && a.size[0] < height && a.size[1] > height).unwrap_or(99999999);
               redraw = true;
