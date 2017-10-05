@@ -20,6 +20,12 @@ pub struct Attack {
   pub damage_type: usize,
   pub range: String,
   // TODO: specials
+  pub charge: bool,
+  pub magical: bool,
+  pub marksman: bool,
+  pub poison: bool,
+  pub slow: bool,
+  //pub backstab: bool,
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Side {
@@ -43,6 +49,10 @@ pub struct UnitType {
   pub resistance: [i32; 6],
   pub attacks: Vec<Attack>,
   // TODO: abilities
+  pub skirmisher: bool,
+  pub regeneration: i32,
+  //pub leadership: bool,
+  pub fearless: bool,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
@@ -200,6 +210,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       }
     },
     & Move::EndTurn => {
+      let previous_side = state.current_side;
       state.current_side += 1;
       if state.current_side >= state.sides.len() {
         state.turn += 1;
@@ -211,7 +222,9 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
         if let Some (unit) = location.unit.as_mut() {
           if unit.side == state.current_side {
             let terrain_healing = state.map.config.terrain_info.get (location.terrain).unwrap().healing;
-            let healing = if unit.poisoned && terrain_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
+            let regular_healing = max (terrain_healing, unit.unit_type.regeneration);
+            let healing = if unit.poisoned && regular_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
+            if regular_healing > 0 {unit.poisoned = false;}
             unit.resting = true;
             unit.moves = unit.unit_type.max_moves;
             unit.attacks_left = 1;
@@ -221,6 +234,9 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
             if healing < 0 && unit.hitpoints > 1{
               unit.hitpoints = ::std::cmp::max (1, unit.hitpoints + healing);
             }
+          }
+          if unit.side == previous_side {
+            unit.slowed = false;
           }
         }
       }
@@ -267,7 +283,9 @@ pub fn lawful_bonus (state: & State)->i32 {
   else { 0 }
 }
 pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
-  100 + unit.unit_type.alignment*lawful_bonus (state)
+  let bonus = unit.unit_type.alignment*lawful_bonus (state);
+  if unit.unit_type.fearless && bonus < 0 {return 100;}
+  100 + bonus
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
@@ -275,32 +293,50 @@ pub struct CombatantInfo {
   swings_left: i32,
   pub swings: i32,
   pub damage: i32,
+  pub slow_damage: i32,
   pub chance: i32,
+  pub slow: bool,
+  pub poison: bool,
 }
 
-fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Option <& Attack>)->CombatantInfo {
+fn round_damage (original: i32, numerator: i32, denominator: i32)->i32 {
+  let damage_scaled = original * numerator;
+  let damage_rounded_to_nearest = (damage_scaled + (denominator>>1))/denominator;
+  if damage_rounded_to_nearest < 1 {
+    1
+  } else if (damage_rounded_to_nearest < original) && ((damage_scaled % denominator) == (denominator>>1)) {
+    damage_rounded_to_nearest + 1
+  } else {
+    damage_rounded_to_nearest
+  }
+}
+
+fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Option <& Attack>, opponent_attack: Option<& Attack>, is_attacker: bool)->CombatantInfo {
   match attack {
     None => CombatantInfo {
       swings_left: 0,
       swings: 0,
       damage: 0,
+      slow_damage: 0,
       chance: 0,
+      slow: false, poison: false,
     },
     Some (attack) => {
-      let damage_scaled = attack.damage * opponent.unit_type.resistance.get (attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit);
-      let damage_rounded_to_nearest = (damage_scaled + 5000)/10000;
-      let damage = if damage_rounded_to_nearest < 1 {
-        1
-      } else if (damage_rounded_to_nearest < attack.damage) && ((damage_scaled % 10000) == 5000) {
-        damage_rounded_to_nearest + 1
-      } else {
-        damage_rounded_to_nearest
+      let attacker_attack = if is_attacker {Some(attack)} else {opponent_attack};
+      let mut damage = attack.damage;
+      if attacker_attack.map_or (false, | a | a.charge) {damage *= 2;}
+      let multiplier = opponent.unit_type.resistance.get (attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit);
+      let chance = if attack.magical {70} else {
+        let chance = opponent.unit_type.defense.get (state.get (opponent.x, opponent.y).terrain).unwrap().clone();
+        if chance <60 && attack.marksman {60} else {chance}
       };
       CombatantInfo {
         swings_left: attack.number,
         swings: attack.number,
-        damage: damage,
-        chance: opponent.unit_type.defense.get (state.get (opponent.x, opponent.y).terrain).unwrap().clone(),
+        damage: round_damage (attack.damage, multiplier, 10000),
+        slow_damage: round_damage (attack.damage, multiplier, 10000),
+        chance: chance,
+        slow: attack. slow, poison: attack.poison,
       }
     },
   }
@@ -312,8 +348,8 @@ fn make_combatants <R, Maker: Fn (& Unit, & Unit, Option <& Attack>, Option <& A
   let defender_attack = defender.unit_type.attacks.get (defender_weapon);
   
   (
-    make_combatant (attacker, defender, Some (attacker_attack), defender_attack, combatant_info (state, attacker, defender, Some (attacker_attack))),
-    make_combatant (defender, attacker, defender_attack, Some (attacker_attack), combatant_info (state, defender, attacker, defender_attack)),
+    make_combatant (attacker, defender, Some (attacker_attack), defender_attack, combatant_info (state, attacker, defender, Some (attacker_attack), defender_attack, true)),
+    make_combatant (defender, attacker, defender_attack, Some (attacker_attack), combatant_info (state, defender, attacker, defender_attack, Some (attacker_attack), false)),
   )
 }
 
@@ -329,7 +365,11 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
   fn swing (swinger: &mut Combatant, victim: &mut Combatant)->bool {
     swinger.info.swings_left -= 1;
     if rand::thread_rng().gen_range (0, 100) >= swinger.info.chance {return true;}
-    victim.unit.hitpoints -= swinger.info.damage;
+    
+    victim.unit.hitpoints -= if swinger.unit.slowed {swinger.info.slow_damage} else {swinger.info.damage};
+    if swinger.info.slow {victim.unit.slowed = true;}
+    if swinger.info.poison {victim.unit.poisoned = true;}
+    
     return victim.unit.hitpoints >0;
   }
   fn finish (me: &mut Combatant, other: &mut Combatant) {
@@ -520,7 +560,7 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
         let stuff = state.get (adjacent [0], adjacent [1]);
         let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
         if remaining >= 0 && !discovered.contains (&adjacent) && stuff.unit.as_ref().map_or (true, | neighbor | !state.is_enemy (unit.side, neighbor.side)) {
-          if remaining >0 {
+          if remaining > 0 && !unit.unit_type.skirmisher {
             for double_adjacent in adjacent_locations (& state.map, adjacent) {
               if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
                 remaining = 0;
