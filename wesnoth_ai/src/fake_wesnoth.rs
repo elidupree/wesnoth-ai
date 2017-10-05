@@ -374,6 +374,7 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
 // TODO: slow, etc.
 
 use smallvec::SmallVec;
+use arrayvec::ArrayVec;
 #[derive (Clone, Debug)]
 pub struct CombatantStats {
   pub info: CombatantInfo,
@@ -482,15 +483,22 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
   stats
 }
 
-pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->Vec<[i32; 2]> {
-  vec![
-    [coordinates [0], coordinates [1] + 1],
-    [coordinates [0], coordinates [1] - 1],
-    [coordinates [0]-1, coordinates [1] - (coordinates [0]&1)],
-    [coordinates [0]-1, coordinates [1] + 1 - (coordinates [0]&1)],
-    [coordinates [0]+1, coordinates [1] - (coordinates [0]&1)],
-    [coordinates [0]+1, coordinates [1] + 1 - (coordinates [0]&1)],
-  ].into_iter().filter (|&[x,y]| x >= 1 && y >= 1 && x <= map.width && y <= map.height).collect()
+pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->ArrayVec<[[i32; 2]; 6]> {
+  let mut result = ArrayVec::new();
+  {
+  let mut consider = | [x,y]:[i32;2] | {
+    if x >= 1 && y >= 1 && x <= map.width && y <= map.height {
+      result.push ([x,y]);
+    }
+  };
+  consider ([coordinates [0], coordinates [1] + 1]);
+  consider ([coordinates [0], coordinates [1] - 1]);
+  consider ([coordinates [0]-1, coordinates [1] - (coordinates [0]&1)]);
+  consider ([coordinates [0]-1, coordinates [1] + 1 - (coordinates [0]&1)]);
+  consider ([coordinates [0]+1, coordinates [1] - (coordinates [0]&1)]);
+  consider ([coordinates [0]+1, coordinates [1] + 1 - (coordinates [0]&1)]);
+  }
+  result
 }
 
 pub fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {

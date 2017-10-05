@@ -10,6 +10,8 @@ extern crate glium;
 #[macro_use]
 extern crate conrod;
 extern crate smallvec;
+extern crate arrayvec;
+
 
 macro_rules! printerr(
     ($($arg:tt)*) => { {use std::io::Write;
