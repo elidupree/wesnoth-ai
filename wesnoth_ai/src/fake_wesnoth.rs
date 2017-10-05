@@ -17,14 +17,14 @@ pub trait Player {
 pub struct Attack {
   pub damage: i32,
   pub number: i32,
-  pub damage_type: String,
+  pub damage_type: usize,
   pub range: String,
   // TODO: specials
 }
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Side {
   pub gold: i32,
-  pub enemies: HashSet <usize>,
+  pub enemies: Vec<bool>,
   pub recruits: Vec<String>,
 }
 
@@ -38,9 +38,9 @@ pub struct UnitType {
   pub max_moves: i32,
   pub not_living: bool,
   pub zone_of_control: bool,
-  pub defense: HashMap<String, i32>,
-  pub movement_costs: HashMap <String, i32>,
-  pub resistance: HashMap <String, i32>,
+  pub defense: Vec<i32>,
+  pub movement_costs: Vec<i32>,
+  pub resistance: [i32; 6],
   pub attacks: Vec<Attack>,
   // TODO: abilities
 }
@@ -63,7 +63,7 @@ pub struct Unit {
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Location {
-  pub terrain: String,
+  pub terrain: usize,
   pub village_owner: Option<usize>,
   pub unit: Option <Box <Unit>>,
 
@@ -85,7 +85,7 @@ pub struct Faction {
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
   pub unit_type_examples: HashMap <String, Unit>,
-  pub terrain_info: HashMap <String, TerrainInfo>,
+  pub terrain_info: Vec<TerrainInfo>,
   pub factions: Vec<Faction>,
 }
 
@@ -112,8 +112,8 @@ pub struct State {
 impl State {
   pub fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}
   pub fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [((x-1)+(y-1)*self.map.width) as usize]}
-  pub fn get_terrain_info (&self, x: i32,y: i32)->&TerrainInfo {self.map.config.terrain_info.get (&self.get(x,y).terrain).unwrap()}
-  pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies.contains (& other)}
+  pub fn get_terrain_info (&self, x: i32,y: i32)->&TerrainInfo {self.map.config.terrain_info.get (self.get(x,y).terrain).unwrap()}
+  pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies[other]}
 }
 
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
@@ -210,7 +210,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       for location in state.locations.iter_mut() {
         if let Some (unit) = location.unit.as_mut() {
           if unit.side == state.current_side {
-            let terrain_healing = state.map.config.terrain_info.get (&location.terrain).unwrap().healing;
+            let terrain_healing = state.map.config.terrain_info.get (location.terrain).unwrap().healing;
             let healing = if unit.poisoned && terrain_healing >0 {0} else if unit.poisoned {-8} else {terrain_healing} + if unit.resting {2} else {0};
             unit.resting = true;
             unit.moves = unit.unit_type.max_moves;
@@ -279,7 +279,7 @@ fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Optio
       chance: 0,
     },
     Some (attack) => {
-      let damage_scaled = attack.damage * opponent.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit);
+      let damage_scaled = attack.damage * opponent.unit_type.resistance.get (attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit);
       let damage_rounded_to_nearest = (damage_scaled + 5000)/10000;
       let damage = if damage_rounded_to_nearest < 1 {
         1
@@ -292,7 +292,7 @@ fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Optio
         swings_left: attack.number,
         swings: attack.number,
         damage: damage,
-        chance: opponent.unit_type.defense.get (&state.get (opponent.x, opponent.y).terrain).unwrap().clone(),
+        chance: opponent.unit_type.defense.get (state.get (opponent.x, opponent.y).terrain).unwrap().clone(),
       }
     },
   }
@@ -496,7 +496,7 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
       for adjacent in adjacent_locations (& state.map, location) {
         let stuff = state.get (adjacent [0], adjacent [1]);
-        let mut remaining = moves_left - unit.unit_type.movement_costs.get (& stuff.terrain).unwrap();
+        let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
         if remaining >= 0 && !discovered.contains (&adjacent) && stuff.unit.as_ref().map_or (true, | neighbor | !state.is_enemy (unit.side, neighbor.side)) {
           if remaining >0 {
             for double_adjacent in adjacent_locations (& state.map, adjacent) {
@@ -511,7 +511,7 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
         }
       }
       let stuff = state.get (location [0], location [1]);
-      let info = state.map.config.terrain_info.get (&stuff.terrain).unwrap();
+      let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
       let capture = info.village && stuff.village_owner != Some(unit.side);
       results.push ((location, if capture {0} else {moves_left}));
     }
@@ -523,7 +523,7 @@ pub fn total_income (state: & State, side: usize)->i32 {
   let mut villages = 0;
   let mut upkeep = 0;
   for location in state.locations.iter() {
-    if state.map.config.terrain_info.get (&location.terrain).unwrap().village && location.village_owner == Some(side) {
+    if state.map.config.terrain_info.get (location.terrain).unwrap().village && location.village_owner == Some(side) {
       villages += 1;
     }
     if let Some (unit) = location.unit.as_ref() {

@@ -86,7 +86,7 @@ pub fn neural_bool (value: bool)->f64 {if value {1.0} else {0.0}}
 
 const LOCATION_SIZE: usize = 6;
 pub fn neural_location (state: & fake_wesnoth::State,x: i32,y: i32)->Vec<f64> {
-  let terrain = & state.get (x, y).terrain;
+  let terrain = state.get (x, y).terrain;
   let info = state.map.config.terrain_info.get (terrain).unwrap();
   vec![
     x as f64, y as f64,
@@ -97,7 +97,7 @@ pub fn neural_location (state: & fake_wesnoth::State,x: i32,y: i32)->Vec<f64> {
 
 const UNIT_SIZE: usize = 23;
 pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<f64> {
-  let terrain = & state.get (unit.x, unit.y).terrain;
+  let terrain = state.get (unit.x, unit.y).terrain;
   vec![
     unit.x as f64, unit.y as f64,
     unit.moves as f64, unit.attacks_left as f64,
@@ -107,12 +107,12 @@ pub fn neural_unit (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->V
     neural_bool (unit.slowed), neural_bool (unit.poisoned), neural_bool (unit.unit_type.not_living),
     unit.unit_type.alignment as f64,
     neural_bool (unit.unit_type.zone_of_control),
-    unit.unit_type.resistance.get ("blade").unwrap().clone() as f64,
-    unit.unit_type.resistance.get ("pierce").unwrap().clone() as f64,
-    unit.unit_type.resistance.get ("impact").unwrap().clone() as f64,
-    unit.unit_type.resistance.get ("fire").unwrap().clone() as f64,
-    unit.unit_type.resistance.get ("cold").unwrap().clone() as f64,
-    unit.unit_type.resistance.get ("arcane").unwrap().clone() as f64,
+    unit.unit_type.resistance.get (0/*"blade"*/).unwrap().clone() as f64,
+    unit.unit_type.resistance.get (1/*"pierce"*/).unwrap().clone() as f64,
+    unit.unit_type.resistance.get (2/*"impact"*/).unwrap().clone() as f64,
+    unit.unit_type.resistance.get (3/*"fire"*/).unwrap().clone() as f64,
+    unit.unit_type.resistance.get (4/*"cold"*/).unwrap().clone() as f64,
+    unit.unit_type.resistance.get (5/*"arcane"*/).unwrap().clone() as f64,
     unit.unit_type.defense.get (terrain).unwrap().clone() as f64,
     unit.unit_type.movement_costs.get (terrain).unwrap().clone() as f64,
     
@@ -172,12 +172,12 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
 pub fn recruit_hexes (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<[i32; 2]> {
   let mut discovered = HashSet::new();
   let mut frontier = Vec::new();
-  if state.map.config.terrain_info.get (&state.get (unit.x, unit.y).terrain).unwrap().keep {
+  if state.map.config.terrain_info.get (state.get (unit.x, unit.y).terrain).unwrap().keep {
     frontier.push ([unit.x, unit.y]);
   }
   while let Some (location) = frontier.pop() {
     for adjacent in fake_wesnoth::adjacent_locations (& state.map, location) {
-      if state.map.config.terrain_info.get (&state.get (adjacent [0], adjacent [1]).terrain).unwrap().castle && !discovered.contains (& adjacent) {
+      if state.map.config.terrain_info.get (state.get (adjacent [0], adjacent [1]).terrain).unwrap().castle && !discovered.contains (& adjacent) {
         frontier.push (adjacent);
       }
       discovered.insert (location);

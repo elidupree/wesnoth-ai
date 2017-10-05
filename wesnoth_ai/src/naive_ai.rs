@@ -85,8 +85,8 @@ impl Player {
   pub fn evaluate_unit_position (state: & State, unit: &Unit, x: i32, y: i32)->f64 {
     let mut result = 0.0;
     let location = state.get(x, y);
-    let terrain_info = state.map.config.terrain_info.get (&location.terrain).unwrap();
-    let defense = *unit.unit_type.defense.get (&location.terrain).unwrap() as f64;
+    let terrain_info = state.map.config.terrain_info.get (location.terrain).unwrap();
+    let defense = *unit.unit_type.defense.get (location.terrain).unwrap() as f64;
     result -= defense / 10.0;
     if terrain_info.healing > 0 {
       let healing = ::std::cmp::max(terrain_info.healing, unit.unit_type.max_hitpoints - unit.hitpoints);
@@ -108,7 +108,7 @@ impl Player {
           - evaluate_unit_position (state, unit, src_x, src_y)
           + (random::<f64>() - moves_left as f64) / 100.0;
         let destination = state.get(dst_x, dst_y);
-        let terrain_info = state.map.config.terrain_info.get (&destination.terrain).unwrap();
+        let terrain_info = state.map.config.terrain_info.get (destination.terrain).unwrap();
         if terrain_info.village {
           if let Some(owner) = destination.village_owner.as_ref() {
             if state.is_enemy (unit.side, *owner) {
