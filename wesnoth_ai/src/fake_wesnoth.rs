@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::cmp::max;
+use std::cmp::{min, max};
 use rand::{self, Rng};
 
 
@@ -265,6 +265,7 @@ pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct CombatantInfo {
   swings_left: i32,
+  pub swings: i32,
   pub damage: i32,
   pub chance: i32,
 }
@@ -273,6 +274,7 @@ fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Optio
   match attack {
     None => CombatantInfo {
       swings_left: 0,
+      swings: 0,
       damage: 0,
       chance: 0,
     },
@@ -288,6 +290,7 @@ fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Optio
       };
       CombatantInfo {
         swings_left: attack.number,
+        swings: attack.number,
         damage: damage,
         chance: opponent.unit_type.defense.get (&state.get (opponent.x, opponent.y).terrain).unwrap().clone(),
       }
@@ -308,7 +311,6 @@ fn make_combatants <R, Maker: Fn (& Unit, & Unit, Option <& Attack>, Option <& A
 
 pub const CHOOSE_WEAPON: usize = ::std::usize::MAX - 1;
 
-// TODO: remove duplicate code between this and simulate_combat
 pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
   #[derive (Debug)]
   struct Combatant {
@@ -365,72 +367,105 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
 
 use smallvec::SmallVec;
 #[derive (Clone, Debug)]
-pub struct CombatStats {
+pub struct CombatantStats {
   pub info: CombatantInfo,
   pub original_hitpoints: i32,
   pub hits_to_die: usize,
-  pub chances_by_times_hit: SmallVec<[f64; 8]>,
 }
-// TODO: remove duplicate code between this and combat_results
-pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(CombatStats, CombatStats) {  
-  fn swing (swinger: &mut CombatStats, victim: &mut CombatStats) {
-    swinger.info.swings_left -= 1;
-    if victim.chances_by_times_hit.len() <= victim.hits_to_die {
-      victim.chances_by_times_hit.push (0.0);
+#[derive (Clone, Debug)]
+pub struct CombatPossibility {
+  chance: f64,
+}
+#[derive (Clone, Debug)]
+pub struct CombatStats {
+  pub possibilities: SmallVec<[f64; 6*6]>,
+  pub combatants: [CombatantStats; 2],
+}
+
+impl CombatStats {
+  pub fn index_of (&self, hits: [usize; 2])->usize {
+    hits[0] + hits[1]*(self.combatants[0].info.swings+1) as usize
+  }
+  pub fn possibility_chance (&self, hits: [usize; 2])->f64 {
+    self.possibilities.get (self.index_of(hits)).cloned().unwrap_or (0.0)
+  }
+  pub fn possibility_chance_mut (&mut self, hits: [usize; 2])->&mut f64 {
+    let idx = self.index_of (hits);
+    self.possibilities.get_mut(idx).unwrap()
+  }
+}
+
+pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->CombatStats {  
+  fn swing (stats: &mut CombatStats, swinger: usize, victim: usize) {
+    let max_hits_by_swinger_so_far = (stats.combatants [swinger].info.swings - stats.combatants [swinger].info.swings_left) as usize;
+    let max_hits_by_victim_so_far = (stats.combatants [victim].info.swings - stats.combatants [victim].info.swings_left) as usize;
+    
+    for hits_by_swinger in 0..(max_hits_by_swinger_so_far+1) {
+      for hits_by_victim in 0..min(stats.combatants [swinger].hits_to_die, max_hits_by_victim_so_far+1) {
+        let hits = if swinger == 0 {[hits_by_swinger, hits_by_victim]} else {[hits_by_victim, hits_by_swinger]};
+        let next_hits = if swinger == 0 {[hits_by_swinger+1, hits_by_victim]} else {[hits_by_victim, hits_by_swinger+1]};
+        
+        let chance = stats.possibility_chance (hits);
+        let chance_change = chance*(stats.combatants [swinger].info.chance as f64/100.0);
+        *stats.possibility_chance_mut (hits) -= chance_change;
+        *stats.possibility_chance_mut (next_hits) += chance_change;
+      }
     }
-    for hits in (0..(victim.chances_by_times_hit.len()-1)).rev() {
-      let chance = victim.chances_by_times_hit[hits];
-      let chance_change = chance*(swinger.info.chance as f64/100.0);
-      victim.chances_by_times_hit[hits] -= chance_change;
-      victim.chances_by_times_hit[hits+1] += chance_change;
-    }
+    stats.combatants [swinger].info.swings_left -= 1;
   }
   
-  let (mut ac, mut dc) = make_combatants (state, attacker, defender, attacker_weapon, defender_weapon, |unit, other, attack, other_attack, info | {
-    let mut chances = SmallVec::new();
-    chances.push (1.0);
-    CombatStats {
+  let (ac, dc) = make_combatants (state, attacker, defender, attacker_weapon, defender_weapon, |unit, other, attack, other_attack, info | {
+    CombatantStats {
       info: info,
       original_hitpoints: unit.hitpoints,
       hits_to_die: other_attack.map_or (1, | other_attack| ((unit.hitpoints+other_attack.damage-1) / other_attack.damage) as usize),
-      chances_by_times_hit: chances,
     }
   });
+  let number_of_possibilities = ((ac.info.swings+1)*(dc.info.swings+1)) as usize;
+  let mut possibilities = SmallVec::with_capacity (number_of_possibilities);
+  for _ in 0..number_of_possibilities {
+    possibilities.push (0.0);
+  }
+  let mut stats = CombatStats {
+    combatants: [ac, dc],
+    possibilities: possibilities,
+  };
+  *stats.possibility_chance_mut ([0, 0]) = 1.0;
   
-  while ac.info.swings_left > 0 || dc.info.swings_left > 0 {
-    if ac.info.swings_left > 0 {
-      swing (&mut ac, &mut dc);
+  while stats.combatants [0].info.swings_left > 0 || stats.combatants [1].info.swings_left > 0 {
+    if stats.combatants [0].info.swings_left > 0 {
+      swing (&mut stats, 0, 1);
     }
-    if dc.info.swings_left > 0 {
-      swing (&mut dc, &mut ac);
+    if stats.combatants [1].info.swings_left > 0 {
+      swing (&mut stats, 1, 0);
     }
   }
-  //printlnerr!("{:?}, {:?}, {:?}, {:?}, ", attacker, defender, ac, dc);
   
-  (
-    ac,
-    dc,
-  )
+  stats
 }
 pub struct AnalyzedStats {
   pub average_hitpoints: f64,
   pub death_chance: f64,
 }
-pub fn analyze_stats (stats: &CombatStats, opponent_stats: &CombatStats)->AnalyzedStats {
+pub fn analyze_stats (stats: &CombatStats, unit: usize, opponent: usize)->AnalyzedStats {
   let mut result = AnalyzedStats {
     average_hitpoints: 0.0,
     death_chance: 0.0,
   };
-  for (hits, chance) in stats.chances_by_times_hit.iter().enumerate() {
-    let hitpoints = max (0, stats.original_hitpoints - opponent_stats.info.damage*hits as i32);
-    result.average_hitpoints += hitpoints as f64*chance;
-    if hitpoints <= 0 {result.death_chance += *chance;}
+  for hits_by_unit in 0..(stats.combatants [unit].info.swings+1) as usize {
+    for hits_by_opponent in 0..(stats.combatants [opponent].info.swings+1) as usize {
+      let hits = if unit == 0 {[hits_by_unit, hits_by_opponent]} else {[hits_by_opponent, hits_by_unit]};
+      let chance = stats.possibility_chance (hits);
+      let hitpoints = max (0, stats.combatants [unit].original_hitpoints - stats.combatants [opponent].info.damage*hits_by_opponent as i32);
+      result.average_hitpoints += hitpoints as f64*chance;
+      if hitpoints <= 0 {result.death_chance += chance;}
+    }
   }
   result
 }
 pub fn simulate_and_analyze (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(AnalyzedStats, AnalyzedStats) {
   let stats = simulate_combat (state, attacker, defender, attacker_weapon, defender_weapon);
-  (analyze_stats (&stats.0, &stats.1), analyze_stats (&stats.1, &stats.0))
+  (analyze_stats (&stats, 0, 1), analyze_stats (&stats, 1, 0))
 }
 
 pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->Vec<[i32; 2]> {
