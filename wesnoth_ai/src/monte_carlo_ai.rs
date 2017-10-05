@@ -63,7 +63,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> fake_wesnoth
       starting_turn: state.turn,
       starting_side: state.current_side,
     };
-    for _ in 0..3500 {
+    for _ in 0..7000 {
       self.step_into_node (&mut globals, &mut root);
     }
     
@@ -102,7 +102,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
     /*else if node.visits == 0 {
       self.evaluate_state (&node.state)
     }*/
-    else if node.state.current_side == globals.starting_side && node.state.turn == globals.starting_turn + 2 {
+    else if node.state.current_side == globals.starting_side && node.state.turn == globals.starting_turn + 3 {
       ::naive_ai::evaluate_state(&node.state)
     }
     else {
