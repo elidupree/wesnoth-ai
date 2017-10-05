@@ -53,7 +53,7 @@ local calculate_and_do_one_move = function()
   if type(best_move) == "table" then
     movetype, value  = next (best_move)
   end
-  error_message (movetype, true)
+  --error_message (movetype, true)
   --error_message (movetype..inspect(value), true)
   return do_move_by_type [movetype] (value)
 end
