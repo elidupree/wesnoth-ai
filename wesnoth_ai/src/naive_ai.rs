@@ -130,7 +130,7 @@ impl Player {
         attacker.x = dst_x;
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
-        let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, usize::max_value() - 1);
+        let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON);
         evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}) + random::<f64>() + stats_badness (&defender, &stats.1) - stats_badness (&attacker, &stats.0)
       }
       &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {

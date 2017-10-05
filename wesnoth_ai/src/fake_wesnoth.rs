@@ -261,29 +261,64 @@ pub fn alignment_multiplier (state: & State, unit: & Unit)->i32 {
   100 + unit.unit_type.alignment*lawful_bonus (state)
 }
 
+#[derive (Debug)]
+struct CombatantInfo {
+  swings_left: i32,
+  damage: i32,
+  chance: i32,
+}
+
+fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Option <& Attack>)->CombatantInfo {
+  match attack {
+    None => CombatantInfo {
+      swings_left: 0,
+      damage: 0,
+      chance: 0,
+    },
+    Some (attack) => {
+      let damage_scaled = attack.damage * opponent.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit);
+      let damage_rounded_to_nearest = (damage_scaled + 5000)/10000;
+      let damage = if damage_rounded_to_nearest < 1 {
+        1
+      } else if (damage_rounded_to_nearest < attack.damage) && ((damage_scaled % 10000) == 5000) {
+        damage_rounded_to_nearest + 1
+      } else {
+        damage_rounded_to_nearest
+      };
+      CombatantInfo {
+        swings_left: attack.number,
+        damage: damage,
+        chance: opponent.unit_type.defense.get (&state.get (opponent.x, opponent.y).terrain).unwrap().clone(),
+      }
+    },
+  }
+}
+
+fn make_combatants <R, Maker: Fn (& Unit, & Unit, Option <& Attack>, CombatantInfo)->R> (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize, make_combatant: Maker) -> (R,R) {
+  let attacker_attack = &attacker.unit_type.attacks [attacker_weapon];
+  let defender_weapon = if defender_weapon == CHOOSE_WEAPON { choose_defender_weapon (state, attacker, defender, attacker_weapon) } else {defender_weapon};
+  let defender_attack = defender.unit_type.attacks.get (defender_weapon);
+  
+  (
+    make_combatant (attacker, defender, Some (attacker_attack), combatant_info (state, attacker, defender, Some (attacker_attack))),
+    make_combatant (defender, attacker, defender_attack, combatant_info (state, defender, attacker, defender_attack)),
+  )
+}
+
+pub const CHOOSE_WEAPON: usize = ::std::usize::MAX - 1;
+
 // TODO: remove duplicate code between this and simulate_combat
 pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->(Option <Box <Unit>>, Option <Box <Unit>>) {
   #[derive (Debug)]
   struct Combatant {
     unit: Box <Unit>,
-    swings_left: i32,
-    damage: i32,
-    chance: i32,
+    info: CombatantInfo,
   }
-  let make_combatant = |unit: &Unit, attack: Option <& Attack>, other: & Unit|->Combatant {
-    Combatant {
-      unit: Box::new (unit.clone()),
-      swings_left: attack.map_or (0, | attack | attack.number),
-      // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
-      chance: other.unit_type.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
-    }
-  };
   
   fn swing (swinger: &mut Combatant, victim: &mut Combatant)->bool {
-    swinger.swings_left -= 1;
-    if rand::thread_rng().gen_range (0, 100) >= swinger.chance {return true;}
-    victim.unit.hitpoints -= swinger.damage;
+    swinger.info.swings_left -= 1;
+    if rand::thread_rng().gen_range (0, 100) >= swinger.info.chance {return true;}
+    victim.unit.hitpoints -= swinger.info.damage;
     return victim.unit.hitpoints >0;
   }
   fn finish (me: &mut Combatant, other: &mut Combatant) {
@@ -298,20 +333,20 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
     }
   }
   
-  let attacker_attack = &attacker.unit_type.attacks [weapon];
-  // TODO: actual selection of best defender attack
-  let defender_attack = defender.unit_type.attacks.get (choose_defender_weapon (state, attacker, defender, weapon));
-  
-  let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
-  let mut dc = make_combatant (defender, defender_attack, attacker);
+  let (mut ac, mut dc) = make_combatants (state, attacker, defender, weapon, CHOOSE_WEAPON, |unit, other, attack, info | {
+    Combatant {
+      unit: Box::new (unit.clone()),
+      info: info,
+    }
+  });
   ac.unit.resting = false;
   dc.unit.resting = false;
   
-  while ac.swings_left > 0 || dc.swings_left > 0 {
-    if ac.swings_left > 0 {
+  while ac.info.swings_left > 0 || dc.info.swings_left > 0 {
+    if ac.info.swings_left > 0 {
       if !swing (&mut ac, &mut dc) { break; }
     }
-    if dc.swings_left > 0 {
+    if dc.info.swings_left > 0 {
       if !swing (&mut dc, &mut ac) { break; }
     }
   }
@@ -339,22 +374,11 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
   #[derive (Debug)]
   struct Combatant {
     stats: CombatStats,
-    swings_left: i32,
-    damage: i32,
-    chance: i32,
+    info: CombatantInfo,
   }
-  let make_combatant = |unit: &Unit, attack: Option <& Attack>, other: & Unit|->Combatant {
-    Combatant {
-      stats: CombatStats {possibilities: ::std::iter::once ((CombatantState {hitpoints: unit.hitpoints}, 1.0)).collect()},
-      swings_left: attack.map_or (0, | attack | attack.number),
-      // TODO: correct rounding direction
-      damage: attack.map_or (0, | attack | attack.damage * other.unit_type.resistance.get (&attack.damage_type).cloned().unwrap_or (100)*alignment_multiplier (state, unit) / 10000),
-      chance: other.unit_type.defense.get (&state.get (other.x, other.y).terrain).unwrap().clone(),
-    }
-  };
   
   fn swing (swinger: &mut Combatant, victim: &mut Combatant) {
-    swinger.swings_left -= 1;
+    swinger.info.swings_left -= 1;
     
     for (possibility, chance) in ::std::mem::replace (&mut victim.stats.possibilities, HashMap::new()) {
       if possibility.hitpoints <= 0 {
@@ -362,26 +386,26 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
       }
       else {
         let mut hit_possibility = possibility.clone();
-        hit_possibility.hitpoints -= swinger.damage;
+        hit_possibility.hitpoints -= swinger.info.damage;
         if hit_possibility.hitpoints < 0 {hit_possibility.hitpoints = 0;}
-        (*victim.stats.possibilities.entry (possibility).or_insert (0.0)) += chance*((100 - swinger.chance) as f64/100.0);
-        (*victim.stats.possibilities.entry (hit_possibility).or_insert (0.0)) += chance*(swinger.chance as f64/100.0);
+        (*victim.stats.possibilities.entry (possibility).or_insert (0.0)) += chance*((100 - swinger.info.chance) as f64/100.0);
+        (*victim.stats.possibilities.entry (hit_possibility).or_insert (0.0)) += chance*(swinger.info.chance as f64/100.0);
       }
     }
   }
   
-  let attacker_attack = &attacker.unit_type.attacks [attacker_weapon];
-  let defender_weapon = if defender_weapon == usize::max_value() - 1 { choose_defender_weapon (state, attacker, defender, attacker_weapon) } else {defender_weapon};
-  let defender_attack = defender.unit_type.attacks.get (defender_weapon);
+  let (mut ac, mut dc) = make_combatants (state, attacker, defender, attacker_weapon, defender_weapon, |unit, other, attack, info | {
+    Combatant {
+      stats: CombatStats {possibilities: ::std::iter::once ((CombatantState {hitpoints: unit.hitpoints}, 1.0)).collect()},
+      info: info,
+    }
+  });
   
-  let mut ac = make_combatant (attacker, Some (attacker_attack), defender);
-  let mut dc = make_combatant (defender, defender_attack, attacker);
-  
-  while ac.swings_left > 0 || dc.swings_left > 0 {
-    if ac.swings_left > 0 {
+  while ac.info.swings_left > 0 || dc.info.swings_left > 0 {
+    if ac.info.swings_left > 0 {
       swing (&mut ac, &mut dc);
     }
-    if dc.swings_left > 0 {
+    if dc.info.swings_left > 0 {
       swing (&mut dc, &mut ac);
     }
   }
