@@ -137,13 +137,13 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
       attacker.x = dst_x;
       attacker.y = dst_y;
       let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
-      let stats = fake_wesnoth::simulate_and_analyze (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON);
+      let stats = fake_wesnoth::simulate_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON);
       NeuralInput {
         input_type: "attack".to_string(),
         vector: 
           vec![
-            stats.0.death_chance, stats.1.death_chance,
-            attacker.hitpoints as f64 - stats.0.average_hitpoints, defender.hitpoints as f64 - stats.1.average_hitpoints,
+            stats.combatants[0].death_chance, stats.combatants[1].death_chance,
+            attacker.hitpoints as f64 - stats.combatants[0].average_hitpoints, defender.hitpoints as f64 - stats.combatants[1].average_hitpoints,
             0.0, 0.0, 0.0, 0.0
           ].into_iter()
           .chain(neural_location (state, dst_x, dst_y))

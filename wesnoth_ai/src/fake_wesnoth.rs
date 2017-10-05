@@ -235,15 +235,23 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
   }
 }
 
+pub fn defender_weapon_score (stats: & CombatStats)->f64 {
+  ((stats.combatants [0].death_chance - stats.combatants [1].death_chance) *100000.0)
+    +(stats.combatants [1].original_hitpoints as f64 - stats.combatants [1].average_hitpoints)
+    -(stats.combatants [0].original_hitpoints as f64 - stats.combatants [0].average_hitpoints)
+}
+
 pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Unit, weapon: usize)->usize {
   let attacker_attack = &attacker.unit_type.attacks [weapon];
+  let matching_attacks = || defender.unit_type.attacks.iter().enumerate().filter (| &(_, attack) | attack.range == attacker_attack.range);
+  if matching_attacks().count() == 1 {return matching_attacks().next().unwrap().0;}
   // pretty similar rules to Wesnoth, but is not important to get them exactly the same.
   let mut best_index = usize::max_value();
   let mut best_score = -100000000000.0;
-  for (index, attack) in defender.unit_type.attacks.iter().enumerate() {
+  for (index, attack) in matching_attacks() {
     if attack.range == attacker_attack.range {
-      let stats = simulate_and_analyze (state, attacker, defender, weapon, index);
-      let score = ((stats.0.death_chance - stats.1.death_chance) *100000.0) +(attacker.hitpoints as f64 - stats.0.average_hitpoints) - (defender.hitpoints as f64 - stats.1.average_hitpoints);
+      let stats = simulate_combat (state, attacker, defender, weapon, index);
+      let score = defender_weapon_score (&stats);
       if score >best_score {
         best_score = score;
         best_index = index;
@@ -371,6 +379,8 @@ pub struct CombatantStats {
   pub info: CombatantInfo,
   pub original_hitpoints: i32,
   pub hits_to_die: usize,
+  pub average_hitpoints: f64,
+  pub death_chance: f64,
 }
 #[derive (Clone, Debug)]
 pub struct CombatPossibility {
@@ -395,7 +405,19 @@ impl CombatStats {
   }
 }
 
-pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->CombatStats {  
+pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->CombatStats {
+  if defender_weapon == CHOOSE_WEAPON {
+    let attacker_attack = &attacker.unit_type.attacks [attacker_weapon];
+    let matching_attacks = || defender.unit_type.attacks.iter().enumerate().filter (| &(_, attack) | attack.range == attacker_attack.range);
+    if matching_attacks().count() > 1 {
+      return matching_attacks().map (|(index, _attack)| {
+        let stats = simulate_combat (state, attacker, defender, attacker_weapon, index);
+        let score = defender_weapon_score (&stats);
+        (stats, score)
+      }).max_by (| a,b | a.1.partial_cmp(&b.1).unwrap()).unwrap().0;
+    }
+  }
+
   fn swing (stats: &mut CombatStats, swinger: usize, victim: usize) {
     let max_hits_by_swinger_so_far = (stats.combatants [swinger].info.swings - stats.combatants [swinger].info.swings_left) as usize;
     let max_hits_by_victim_so_far = (stats.combatants [victim].info.swings - stats.combatants [victim].info.swings_left) as usize;
@@ -419,6 +441,8 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
       info: info,
       original_hitpoints: unit.hitpoints,
       hits_to_die: other_attack.map_or (1, | other_attack| ((unit.hitpoints+other_attack.damage-1) / other_attack.damage) as usize),
+      average_hitpoints: 0.0,
+      death_chance: 0.0,
     }
   });
   let number_of_possibilities = ((ac.info.swings+1)*(dc.info.swings+1)) as usize;
@@ -441,31 +465,21 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
     }
   }
   
-  stats
-}
-pub struct AnalyzedStats {
-  pub average_hitpoints: f64,
-  pub death_chance: f64,
-}
-pub fn analyze_stats (stats: &CombatStats, unit: usize, opponent: usize)->AnalyzedStats {
-  let mut result = AnalyzedStats {
-    average_hitpoints: 0.0,
-    death_chance: 0.0,
-  };
-  for hits_by_unit in 0..(stats.combatants [unit].info.swings+1) as usize {
-    for hits_by_opponent in 0..(stats.combatants [opponent].info.swings+1) as usize {
-      let hits = if unit == 0 {[hits_by_unit, hits_by_opponent]} else {[hits_by_opponent, hits_by_unit]};
+  for hits_by_attacker in 0..(stats.combatants [0].info.swings+1) as usize {
+    for hits_by_defender in 0..(stats.combatants [1].info.swings+1) as usize {
+      let hits = [hits_by_attacker, hits_by_defender];
       let chance = stats.possibility_chance (hits);
-      let hitpoints = max (0, stats.combatants [unit].original_hitpoints - stats.combatants [opponent].info.damage*hits_by_opponent as i32);
-      result.average_hitpoints += hitpoints as f64*chance;
-      if hitpoints <= 0 {result.death_chance += chance;}
+      for (unit, opponent) in [(0, 1), (1, 0)].iter().cloned() {
+        let hits_by_opponent = if unit == 0 {hits_by_defender} else {hits_by_attacker};
+        let hitpoints = max (0, stats.combatants [unit].original_hitpoints - stats.combatants [opponent].info.damage*hits_by_opponent as i32);
+        stats.combatants [unit].average_hitpoints += hitpoints as f64*chance;
+        if hitpoints <= 0 {stats.combatants [unit].death_chance += chance;}
+      }
     }
   }
-  result
-}
-pub fn simulate_and_analyze (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->(AnalyzedStats, AnalyzedStats) {
-  let stats = simulate_combat (state, attacker, defender, attacker_weapon, defender_weapon);
-  (analyze_stats (&stats, 0, 1), analyze_stats (&stats, 1, 0))
+
+  
+  stats
 }
 
 pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->Vec<[i32; 2]> {
