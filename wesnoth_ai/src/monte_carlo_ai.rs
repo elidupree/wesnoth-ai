@@ -1,7 +1,7 @@
 use rand::{self, random, Rng};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::cell::RefCell;
 use std::cmp::min;
 
@@ -214,16 +214,21 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
 
 
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-struct Attack {
+pub struct Attack {
   unit_id: usize, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
+}
+#[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub struct Recruit {
+  dst_x: i32, dst_y: i32, unit_type: String,
 }
 /*struct Move {
   src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
 }*/
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-struct SpaceClearingMoves {
+pub struct SpaceClearingMoves {
   planned_moves: Vec<([i32; 2], [i32; 2])>,
   desired_moves: Vec<([i32; 2], [i32; 2])>,
+  desired_empty: Vec<[i32; 2]>,
   follow_up: Box<GenericNodeType>,
   steps: usize,
 }
@@ -241,9 +246,10 @@ pub enum GenericNodeType {
   ChooseAttack,
   ChooseHowToClearSpace(SpaceClearingMoves),
   ExecuteAttack (Attack),
+  ExecuteRecruit (Recruit),
   FinishTurnLazily (Vec<fake_wesnoth::Move>),
 }
-use self::GenericNodeType::{ChooseAttack, ChooseHowToClearSpace, ExecuteAttack, FinishTurnLazily};
+use self::GenericNodeType::{ChooseAttack, ChooseHowToClearSpace, ExecuteAttack, ExecuteRecruit, FinishTurnLazily};
 
 #[derive (Serialize, Deserialize, Debug, Default)]
 pub struct GenericTurnGlobals {
@@ -324,7 +330,7 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
       ChooseHowToClearSpace(moves) => {
         result.clear();
         result.extend (moves.planned_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
-        result.extend (moves.desired_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
+        result.extend (moves.desired_moves.iter().filter_map (| &locations | if locations.1 != locations.0 { Some(to_wesnoth_move (&node.state_globals, locations)) } else {None}));
       },
       ExecuteAttack(Attack {
                 unit_id, dst_x, dst_y, attack_x, attack_y, weapon,
@@ -374,27 +380,57 @@ impl GenericNode {
         .filter_map (| location | location.unit.as_ref())
         .filter(|unit| unit.side == self.state.current_side && unit.attacks_left > 0) {
       for location in fake_wesnoth::find_reach (&self.state, unit) {
-        let unit_there = self.state.get (location.0 [0], location.0 [1]).unit.as_ref();
-        if unit_there.map_or (false, | other | other.side != self.state.current_side) { continue; }
+        if self.state.get (location.0 [0], location.0 [1]).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
+        
+        if unit.canrecruit {
+          for recruit_location in recruit_hexes (&self.state, location.0) {
+            let unit_on_recruit_location = self.state.geta (recruit_location).unit.as_ref();
+            if unit_on_recruit_location.map_or (false, | other | other.side != self.state.current_side) { continue; }
+            
+            for recruit in self.state.sides [unit.side].recruits.iter() {
+              if self.state.sides [unit.side].gold < self.state.map.config.unit_type_examples.get (recruit).unwrap().unit_type.cost { continue; }
+              let action = ExecuteRecruit(Recruit {
+                dst_x: recruit_location [0], dst_y: recruit_location [1],
+                unit_type: recruit.clone(),
+              });
+              new_children.push(self.new_child (
+                if location.0 == [unit.x,unit.y] && unit_on_recruit_location.is_none() {
+                  action
+                }
+                else {
+                  ChooseHowToClearSpace(SpaceClearingMoves {
+                    desired_moves: vec![([unit.x,unit.y],location.0)],
+                    desired_empty: vec![recruit_location],
+                    planned_moves: Vec::new(),
+                    follow_up: Box::new(action),
+                    steps: 0,
+                  })
+                }
+              ));
+            }
+          }
+        }
+        
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, location.0) {
           if let Some (neighbor) = self.state.get (adjacent [0], adjacent [1]).unit.as_ref() {
             if !self.state.is_enemy (unit.side, neighbor.side) { continue; }
             for index in 0..unit.unit_type.attacks.len() {
-              let attack = Attack {
+              let attack = ExecuteAttack(Attack {
                 unit_id: unit.id,
                 dst_x: location.0 [0], dst_y: location.0 [1],
                 attack_x: adjacent [0], attack_y: adjacent [1],
                 weapon: index,
-              };
+              });
               new_children.push(self.new_child (
                 if location.0 == [unit.x,unit.y] {
-                  ExecuteAttack(attack)
+                  attack
                 }
-else {
+                else {
                   ChooseHowToClearSpace(SpaceClearingMoves {
                     desired_moves: vec![([unit.x,unit.y],location.0)],
+                    desired_empty: Vec::new(),
                     planned_moves: Vec::new(),
-                    follow_up: Box::new(ExecuteAttack(attack)),
+                    follow_up: Box::new(attack),
                     steps: 0,
                   })
                 }
@@ -418,6 +454,7 @@ else {
       })
     };
     let info = match self.node_type {ChooseHowToClearSpace(ref info) => info.clone(), _=>unreachable!()};
+    let forbidden: HashSet<[i32;2]> = info.desired_empty.iter().cloned().chain(info.desired_moves.iter().map (| locations | locations.1)).collect();
     // Really, at some point it gets too complicated, and we want a hard limit to make sure the AI doesn't stack-overflow or whatever
     if info.steps > 8 { return; }
     for (index, planned_move) in info.planned_moves.iter().enumerate() {
@@ -431,6 +468,7 @@ else {
       else {
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, planned_move.1) {
           if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
+          if forbidden.contains(&adjacent) { continue; }
           
           // we may try moving the blocking unit (at destination) out of the way first
           let mut new_info = info.clone();
@@ -465,16 +503,17 @@ else {
         return;
       }
     }
-    for desired_move in info.desired_moves.iter() {
-      let destination = get (&movers, desired_move.1);
+    for &desired_empty in info.desired_empty.iter().chain(info.desired_moves.iter().map (| locations | &locations.1)) {
+      let destination = get (&movers, desired_empty);
       if destination.is_some() {
-        for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, desired_move.1) {
+        for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, desired_empty) {
           if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
+          if forbidden.contains(&adjacent) { continue; }
           
           let mut new_info = info.clone();
           new_info.steps += 1;
-          if let Some (_moves_left) = state_globals.reaches [&desired_move.1].get(&adjacent) {
-            new_info.planned_moves.insert (0, (desired_move.1, adjacent));
+          if let Some (_moves_left) = state_globals.reaches [&desired_empty].get(&adjacent) {
+            new_info.planned_moves.insert (0, (desired_empty, adjacent));
             self.push_new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
           }
         }
@@ -485,7 +524,9 @@ else {
     let mut new_child = self.new_child (*info.follow_up);
     let mut state_after = (*self.state).clone();
     for &locations in info.planned_moves.iter().chain (info.desired_moves.iter()) {
-      fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & to_wesnoth_move (&state_globals, locations));
+      if locations.1 != locations.0 {
+        fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & to_wesnoth_move (&state_globals, locations));
+      }
     }
     new_child.set_state(state_after);
     self.choices.push (new_child);
@@ -504,6 +545,15 @@ else {
         }
       }
       ExecuteAttack(_) => (),
+      ExecuteRecruit(Recruit{dst_x,dst_y,unit_type}) => {
+        if self.choices.is_empty() {
+          let mut new_child = self.new_child (ChooseAttack);
+          let mut state_after = (*self.state).clone();
+          fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type});
+          new_child.set_state(state_after);
+          self.choices.push (new_child);
+        }
+      }
       FinishTurnLazily(_) => {
         if self.choices.is_empty() {
           let mut moves = Vec::new();
@@ -564,23 +614,37 @@ else {
         let mut rave_score = RaveScore { visits: 0, total_score: 0.0, };
         let mut naive_score = 0.0;
         
-        match (&priority_type, &choice.node_type) {
-          (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => {
-            if let Some(scores) = priority_turn.rave_scores.lock().unwrap().get(& info.follow_up).cloned() {
-              rave_score = scores;
-            }
+        if let Some((src, attack)) = match (&priority_type, &choice.node_type) {
+            (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => 
+              match *info.follow_up {
+                ExecuteAttack(ref attack) =>
+                  Some((info.desired_moves [0].0, attack.clone())),
+                _ => None,
+              }
+            (&ChooseAttack, &ExecuteAttack(ref attack)) =>
+              Some(([attack.dst_x, attack.dst_y], attack.clone())),
+            _ => None,
+        } {
+          if let Some(scores) = priority_turn.rave_scores.lock().unwrap().get(&ExecuteAttack(attack.clone())).cloned() {
+            rave_score = scores;
+          }
+          let Attack { unit_id, dst_x, dst_y, attack_x, attack_y, weapon,} = attack;
+          naive_score = ::naive_ai::evaluate_move (&priority_state, &fake_wesnoth::Move::Attack {src_x: src[0], src_y: src[1], dst_x, dst_y, attack_x, attack_y, weapon, });
+        }
+        if let Some(recruit) = match (&priority_type, &choice.node_type) {
+          (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => 
             match *info.follow_up {
-              ExecuteAttack(Attack {
-                unit_id,
-                dst_x, dst_y, attack_x, attack_y, weapon,
-              }) => {
-                naive_score = ::naive_ai::evaluate_move (&priority_state, &fake_wesnoth::Move::Attack {src_x: info.desired_moves [0].0[0], src_y: info.desired_moves [0].0[1], dst_x, dst_y, attack_x, attack_y, weapon, });
-              },
-              _ => (),
+              ExecuteRecruit(ref recruit) => Some(recruit.clone()),
+              _ => None,
             }
-          },
-          _ => (),
-        };
+          (&ChooseAttack, &ExecuteRecruit(ref recruit)) => Some(recruit.clone()),
+          _ => None,
+        } {
+          if let Some(scores) = priority_turn.rave_scores.lock().unwrap().get(&ExecuteRecruit(recruit)).cloned() {
+            rave_score = scores;
+          }
+        }
+        
         let naive_weight = 0.000001;
         let rave_weight = rave_score.visits as f64;
         let exact_weight = (choice.visits*choice.visits) as f64;

@@ -169,11 +169,11 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
   }
 }
 
-pub fn recruit_hexes (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<[i32; 2]> {
+pub fn recruit_hexes (state: & fake_wesnoth::State, source: [i32; 2])->Vec<[i32; 2]> {
   let mut discovered = HashSet::new();
   let mut frontier = Vec::new();
-  if state.map.config.terrain_info.get (state.get (unit.x, unit.y).terrain).unwrap().keep {
-    frontier.push ([unit.x, unit.y]);
+  if state.map.config.terrain_info.get (state.geta (source).terrain).unwrap().keep {
+    frontier.push (source);
   }
   while let Some (location) = frontier.pop() {
     for adjacent in fake_wesnoth::adjacent_locations (& state.map, location) {
@@ -183,7 +183,7 @@ pub fn recruit_hexes (state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)-
       discovered.insert (location);
     }
   }
-  discovered.into_iter().filter (| location | state.get (location [0], location [1]). unit.is_none()).collect()
+  discovered.into_iter().collect()
 }
 
 pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<fake_wesnoth::Move> {
@@ -218,7 +218,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
     }
   }
   if unit.canrecruit {
-    for location in recruit_hexes (state, unit) {
+    for location in recruit_hexes (state, [unit.x, unit.y]).into_iter().filter (| location | state.get (location [0], location [1]). unit.is_none()) {
       for recruit in state.sides [unit.side].recruits.iter() {
         if state.sides [unit.side].gold >= state.map.config.unit_type_examples.get (recruit).unwrap().unit_type.cost {
           results.push (fake_wesnoth::Move::Recruit {
