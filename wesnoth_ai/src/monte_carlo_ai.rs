@@ -555,8 +555,8 @@ else {
       
       
       let c = 0.2; //2.0;
-      let c_log_visits = c*((self.visits+1) as f64).ln();
-      
+      let visits = self.visits;
+      let c_log_visits = c*((visits+1) as f64).ln();
       let priority_state = self.state.clone();
       let priority_turn = self.turn.clone();
       let priority_type = self.node_type.clone();
@@ -586,7 +586,9 @@ else {
         let exact_weight = (choice.visits*choice.visits) as f64;
         let total_weight = naive_weight + rave_weight + exact_weight;
                
-        let uncertainty_bonus = if rave_score.visits + choice.visits == 0 { 100000.0 }
+        let uncertainty_bonus =
+          if visits == 0 { 0.0 }
+          else if rave_score.visits + choice.visits == 0 { 100000.0 }
           else { (c_log_visits/(
             (if rave_score.visits > 6 {6.0} else {rave_score.visits as f64}/2.0)
             + choice.visits as f64
