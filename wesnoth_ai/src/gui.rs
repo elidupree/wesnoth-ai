@@ -79,6 +79,7 @@ struct DisplayedState {
 
 use conrod::{self, widget, Colorable, Positionable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
+use monte_carlo_ai::DisplayableNode;
 pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   const WIDTH: u32 = 600;
   const HEIGHT: u32 = 800;
@@ -156,31 +157,31 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
     if let Ok(root) = tree_receiver.try_recv() {
       //let layers = Vec::new();
       states_display.clear();
-      let mut frontier = vec![(root, [0.0, 1.0])];
+      let mut frontier = vec![(&root as &DisplayableNode, [0.0, 1.0])];
       let mut depth = 0;
       while !frontier.is_empty() {
         let mut next_frontier = Vec::new();
         for (mut node, size) in frontier {
           let diff = size[1]-size[0];
-          node.moves.sort_by_key (|a| a.visits);
+          let mut descendants = node.descendants();
+          descendants.sort_by_key (|a| a.visits());
           let mut prior_visits = Cell::new(0);
-          let node_visits = node.visits;
+          let node_visits = node.visits();
           next_frontier.extend(
-            node.moves.into_iter()
-            .flat_map(|a| {
-              a.determined_outcomes.into_iter().map(|out| {
-                let out_size = [size[0] + diff*prior_visits.get() as f64/node_visits as f64,
-                   size[0] + diff*(prior_visits.get()+out.visits) as f64/node_visits as f64];
-                prior_visits.set(prior_visits.get() + out.visits);
-                (out, out_size)
-              })
+            descendants.into_iter()
+            .map(|child| {
+              let child_size = [
+                size[0] + diff* prior_visits.get()                 as f64/node_visits as f64,
+                size[0] + diff*(prior_visits.get()+child.visits()) as f64/node_visits as f64];
+              prior_visits.set (prior_visits.get()+child.visits());
+              (child, child_size)
             })
           );
           states_display.push (DisplayedState {
             depth: depth,
             size: size,
-            state: node.state.clone(),
-            text: format!("{:.2}\n{}", node.total_score/node.visits as f64, node.visits),
+            state: node.state().unwrap_or(root.state().unwrap()),
+            text: node.info_text(),
           });
         }
         depth += 1;

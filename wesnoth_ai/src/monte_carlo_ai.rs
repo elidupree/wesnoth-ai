@@ -14,6 +14,13 @@ pub struct Player <LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>
   pub last_root: Option <Node>,
 }
 
+pub trait DisplayableNode {
+  fn visits(&self)->i32;
+  fn state (&self)->Option<Arc<State>>;
+  fn info_text (&self)->String;
+  fn descendants (&self)->Vec<&DisplayableNode>;
+}
+
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Node {
   pub state: Arc<State>,
@@ -46,6 +53,23 @@ pub struct ProposedMove {
   pub visits: i32,
   pub total_score: f64,
   pub determined_outcomes: Vec<Node>,
+}
+
+impl DisplayableNode for Node {
+  fn visits(&self)->i32 {self.visits}
+  fn state (&self)->Option<Arc<State>> {Some(self.state.clone())}
+  fn info_text (&self)->String {format!("{:.2}\n{}", self.total_score/self.visits as f64, self.visits)}
+  fn descendants (&self)->Vec<&DisplayableNode> {
+    self.moves.iter().map (| proposed | proposed as &DisplayableNode).collect()
+  }
+}
+impl DisplayableNode for ProposedMove {
+  fn visits(&self)->i32 {self.visits}
+  fn state (&self)->Option<Arc<State>> {None}
+  fn info_text (&self)->String {format!("{:.2}\n{}", self.total_score/self.visits as f64, self.visits)}
+  fn descendants (&self)->Vec<&DisplayableNode> {
+    self.determined_outcomes.iter().map (| outcome | outcome as &DisplayableNode).collect()
+  }
 }
 
 use fake_wesnoth::{State, Unit, Move};
