@@ -271,6 +271,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       for (index, displayed_state) in states_display.iter().enumerate() {
         let focused = states_display.get (focused).unwrap();
         if displayed_state.size [0] > focused.size[1] || displayed_state.size [1] < focused.size[0] { continue; }
+        if depth_width*displayed_state.depth as f64 > WIDTH as f64 { continue; }
         let focused_diff = focused.size [1] - focused.size [0];
         let state = &displayed_state.state;
         
