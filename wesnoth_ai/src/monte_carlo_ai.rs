@@ -706,11 +706,13 @@ impl GenericNode {
             rand::thread_rng().gen_range(0, self.choices.len())
           }
         },
-        _ => match (0.. self.choices.len())
-          .max_by (|a,b| priority(&self.choices[*a]).partial_cmp(&priority(&self.choices[*b])).unwrap()) {
-          None => return TurnedOutToBeImpossible,
-          Some(k) => k,
-        },
+        _ => match self.choices.len() {
+          0 => return TurnedOutToBeImpossible,
+          1 => 0,
+          _ => (0..self.choices.len())
+            .map(|index| (index, priority(&self.choices[index])))
+            .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap()).unwrap().0,
+        }
       };
       
       let scores = match self.choices [choice].step_into () {
