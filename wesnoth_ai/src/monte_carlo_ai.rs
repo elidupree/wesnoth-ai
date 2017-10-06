@@ -212,11 +212,11 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
 
 
 
-
-/*struct Attack {
-  src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
+#[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+struct Attack {
+  unit_id: usize, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
 }
-struct Move {
+/*struct Move {
   src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
 }*/
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
@@ -239,7 +239,7 @@ fn to_wesnoth_move (state_globals: &StateGlobals, locations: ([i32; 2], [i32; 2]
 pub enum GenericNodeType {
   ChooseAttack,
   ChooseHowToClearSpace(SpaceClearingMoves),
-  ExecuteAttack (fake_wesnoth::Move),
+  ExecuteAttack (Attack),
   FinishTurnLazily (Vec<fake_wesnoth::Move>),
 }
 use self::GenericNodeType::{ChooseAttack, ChooseHowToClearSpace, ExecuteAttack, FinishTurnLazily};
@@ -323,8 +323,12 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
         result.extend (moves.planned_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
         result.extend (moves.desired_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
       },
-      ExecuteAttack (action) => {
-        result.push (action);
+      ExecuteAttack(Attack {
+                unit_id, dst_x, dst_y, attack_x, attack_y, weapon,
+              }) => {
+        result.push (fake_wesnoth::Move::Attack {
+                src_x: dst_x, src_y: dst_y, dst_x, dst_y, attack_x, attack_y, weapon,
+              });
         break;
       },
       FinishTurnLazily (actions) => {
@@ -373,8 +377,8 @@ impl GenericNode {
           if let Some (neighbor) = self.state.get (adjacent [0], adjacent [1]).unit.as_ref() {
             if !self.state.is_enemy (unit.side, neighbor.side) { continue; }
             for index in 0..unit.unit_type.attacks.len() {
-              let attack = fake_wesnoth::Move::Attack {
-                src_x: unit.x, src_y: unit.y,
+              let attack = Attack {
+                unit_id: unit.id,
                 dst_x: location.0 [0], dst_y: location.0 [1],
                 attack_x: adjacent [0], attack_y: adjacent [1],
                 weapon: index,
@@ -563,8 +567,8 @@ else {
               rave_score = scores;
             }
             match *info.follow_up {
-              ExecuteAttack(fake_wesnoth::Move::Attack {
-                src_x, src_y,
+              ExecuteAttack(Attack {
+                unit_id,
                 dst_x, dst_y, attack_x, attack_y, weapon,
               }) => {
                 naive_score = ::naive_ai::evaluate_move (&priority_state, &fake_wesnoth::Move::Attack {src_x: info.desired_moves [0].0[0], src_y: info.desired_moves [0].0[1], dst_x, dst_y, attack_x, attack_y, weapon, });
@@ -596,8 +600,8 @@ else {
         total_score + uncertainty_bonus
       };
       let choice = match self.node_type {
-        ExecuteAttack(fake_wesnoth::Move::Attack {
-                src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon,
+        ExecuteAttack(Attack {
+                unit_id, dst_x, dst_y, attack_x, attack_y, weapon,
               }) => {
           if self.choices.is_empty() || self.visits > (1<<self.choices.len()) {
             let mut state_after = (*self.state).clone();
