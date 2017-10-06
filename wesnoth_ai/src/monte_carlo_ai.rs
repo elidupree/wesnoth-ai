@@ -340,6 +340,11 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
               });
         break;
       },
+      ExecuteRecruit(Recruit{dst_x,dst_y,unit_type}) => {
+        result.push (fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type});
+        break;
+      },
+
       FinishTurnLazily (actions) => {
         result.extend (actions);
         break;
@@ -454,7 +459,8 @@ impl GenericNode {
       })
     };
     let info = match self.node_type {ChooseHowToClearSpace(ref info) => info.clone(), _=>unreachable!()};
-    let forbidden: HashSet<[i32;2]> = info.desired_empty.iter().cloned().chain(info.desired_moves.iter().map (| locations | locations.1)).collect();
+    // Currently, we don't allow moving the attacker out of the way so that something else can move to its original location. We should support this eventually. But it's simpler to implement without it being allowed.
+    let forbidden: HashSet<[i32;2]> = info.desired_empty.iter().cloned().chain(info.desired_moves.iter().map (| locations | locations.1)).chain(info.desired_moves.iter().map (| locations | locations.0)).collect();
     // Really, at some point it gets too complicated, and we want a hard limit to make sure the AI doesn't stack-overflow or whatever
     if info.steps > 8 { return; }
     for (index, planned_move) in info.planned_moves.iter().enumerate() {
@@ -503,9 +509,9 @@ impl GenericNode {
         return;
       }
     }
-    for &desired_empty in info.desired_empty.iter().chain(info.desired_moves.iter().map (| locations | &locations.1)) {
+    for desired_empty in info.desired_empty.iter().cloned().chain(info.desired_moves.iter().filter_map (| locations | if locations.1 != locations.0 { Some(locations.1) } else { None })) {
       let destination = get (&movers, desired_empty);
-      if destination.is_some() {
+      if destination.is_some() && !info.desired_moves.iter().any(|loc| loc.0 == desired_empty) {
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, desired_empty) {
           if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
           if forbidden.contains(&adjacent) { continue; }

@@ -156,6 +156,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       if state.get_terrain_info(dst_x, dst_y).village {
         state.get_mut (dst_x, dst_y).village_owner = Some(unit.side);
       }
+      assert!(state.get(dst_x, dst_y).unit.is_none());
       state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
       for player in players.iter_mut() {
         player.move_completed (state, &old_unit, &unit);
@@ -210,6 +211,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       unit.moves = 0;
       unit.attacks_left = 0;
       state.sides [state.current_side].gold -= unit.unit_type.cost;
+      assert!(state.get(dst_x, dst_y).unit.is_none());
       state.get_mut (dst_x, dst_y).unit = Some (unit.clone());
       for player in players.iter_mut() {
         player.recruit_completed (state, &unit);
