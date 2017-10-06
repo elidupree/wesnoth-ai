@@ -226,6 +226,14 @@ struct SpaceClearingMoves {
   follow_up: Box<GenericNodeType>,
 }
 
+fn to_wesnoth_move (state_globals: &StateGlobals, locations: ([i32; 2], [i32; 2]))->fake_wesnoth::Move {
+  fake_wesnoth::Move::Move {
+    src_x: locations.0[0], src_y: locations.0[1],
+    dst_x: locations.1[0], dst_y: locations.1[1],
+    moves_left: state_globals.reaches[&locations.0][&locations.1]
+  }
+}
+
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum GenericNodeType {
   ChooseAttack,
@@ -259,7 +267,7 @@ impl StateGlobals {
   }
 }
 
-struct GenericNode {
+pub struct GenericNode {
   pub state: Arc<State>,
   pub state_globals: Arc<StateGlobals>,
   pub turn: Arc<GenericTurnGlobals>,
@@ -275,6 +283,56 @@ enum StepIntoResult {
   TurnedOutToBeImpossible,
 }
 use self::StepIntoResult::{PlayedOutWithScores, TurnedOutToBeImpossible};
+
+pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
+  let mut root = GenericNode {
+    state: Arc::new (state.clone()),
+    turn: Arc::default(),
+    tree: Arc::new(TreeGlobals {
+      starting_turn: state.turn,
+      starting_side: state.current_side,
+    }),
+    state_globals: Arc::new(StateGlobals::new (state)),
+    visits: 0,
+    total_score: 0.0,
+    choices: Vec::new(),
+    node_type: ChooseAttack, 
+  };
+
+  for _ in 0..7000 {
+    root.step_into ();
+  }
+  
+  let mut result = Vec::new();
+  {
+  let mut node = &root;
+  loop {
+    match node.node_type.clone() {
+      ChooseHowToClearSpace(moves) => {
+        result.clear();
+        result.extend (moves.planned_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
+        result.extend (moves.desired_moves.iter().map (| &locations | to_wesnoth_move (&node.state_globals, locations)));
+      },
+      ExecuteAttack (action) => {
+        result.push (action);
+        break;
+      },
+      FinishTurnLazily (Some(action)) => {
+        result.push (action);
+        if let Some (&fake_wesnoth::Move::EndTurn) = result.last() {
+          break;
+        }
+      },
+      _=>(),
+    };
+    node = node.choices.iter()
+      .max_by_key (|a| a.visits)
+      .unwrap();
+  }
+  }
+    
+  (root, result)
+}
 
 impl GenericNode {
   fn new_child(&self, node_type: GenericNodeType) -> GenericNode {
@@ -395,7 +453,14 @@ impl GenericNode {
         return;
       }
     }
-    self.push_new_child (*info.follow_up);
+    
+    let mut new_child = self.new_child (*info.follow_up);
+    let mut state_after = (*self.state).clone();
+    for &locations in info.planned_moves.iter().chain (info.desired_moves.iter()) {
+      fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & to_wesnoth_move (&state_globals, locations));
+    }
+    new_child.set_state(state_after);
+    self.choices.push (new_child);
   }
 
   fn update_choices (&mut self) {
