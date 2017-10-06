@@ -131,10 +131,15 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       thread::spawn (move | | {
         //let mut player = naive_ai::Player::new(&*state.map);
         //let mut player = simple_lookahead_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
+        /*
         let mut player = monte_carlo_ai::Player::new (| state, side | Box::new (naive_ai::Player::new(&*state.map)));
         let choice = player.choose_move (&state);
         let _ = sender.send (choice);
         let _ = tree_sender.send (player.last_root.unwrap());
+        */
+        let (root, moves) = monte_carlo_ai::choose_moves (& state);
+        let _ = sender.send (moves);
+        let _ = tree_sender.send (root);
       });
       
       //hack 

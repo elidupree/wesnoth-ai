@@ -48,14 +48,16 @@ local do_move_by_type = {
 
 local calculate_and_do_one_move = function()
   dump_all_to_rust()
-  local best_move = receive_from_rust() --choose_move()
-  local movetype, value = best_move, {}
-  if type(best_move) == "table" then
-    movetype, value  = next (best_move)
+  local moves = receive_from_rust() --choose_move()
+  for i,move in ipairs(moves) do
+    local movetype, value = move, {}
+    if type(move) == "table" then
+      movetype, value  = next (move)
+    end
+    --error_message (movetype, true)
+    --error_message (movetype..inspect(value), true)
+    if do_move_by_type [movetype] (value) then return true end
   end
-  --error_message (movetype, true)
-  --error_message (movetype..inspect(value), true)
-  return do_move_by_type [movetype] (value)
 end
 
 

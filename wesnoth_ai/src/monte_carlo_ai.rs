@@ -224,6 +224,7 @@ struct SpaceClearingMoves {
   planned_moves: Vec<([i32; 2], [i32; 2])>,
   desired_moves: Vec<([i32; 2], [i32; 2])>,
   follow_up: Box<GenericNodeType>,
+  steps: usize,
 }
 
 fn to_wesnoth_move (state_globals: &StateGlobals, locations: ([i32; 2], [i32; 2]))->fake_wesnoth::Move {
@@ -276,6 +277,15 @@ pub struct GenericNode {
   pub total_score: f64,
   pub choices: Vec<GenericNode>,
   pub node_type: GenericNodeType,
+}
+
+impl DisplayableNode for GenericNode {
+  fn visits(&self)->i32 {self.visits}
+  fn state (&self)->Option<Arc<State>> {Some(self.state.clone())}
+  fn info_text (&self)->String {format!("{:.2}\n{}", self.total_score/self.visits as f64, self.visits)}
+  fn descendants (&self)->Vec<&DisplayableNode> {
+    self.choices.iter().map (| choice | choice as &DisplayableNode).collect()
+  }
 }
 
 enum StepIntoResult {
@@ -372,11 +382,17 @@ impl GenericNode {
                 weapon: index,
               };
               new_children.push(self.new_child (
-                GenericNodeType::ChooseHowToClearSpace(SpaceClearingMoves {
-                  desired_moves: vec![([unit.x,unit.y],location.0)],
-                  planned_moves: Vec::new(),
-                  follow_up: Box::new(ExecuteAttack(attack)),
-                })
+                if location.0 == [unit.x,unit.y] {
+                  ExecuteAttack(attack)
+                }
+else {
+                  ChooseHowToClearSpace(SpaceClearingMoves {
+                    desired_moves: vec![([unit.x,unit.y],location.0)],
+                    planned_moves: Vec::new(),
+                    follow_up: Box::new(ExecuteAttack(attack)),
+                    steps: 0,
+                  })
+                }
               ));
             }
           }
@@ -397,8 +413,11 @@ impl GenericNode {
       })
     };
     let info = match self.node_type {ChooseHowToClearSpace(ref info) => info.clone(), _=>unreachable!()};
+    // Really, at some point it gets too complicated, and we want a hard limit to make sure the AI doesn't stack-overflow or whatever
+    if info.steps > 8 { return; }
     for (index, planned_move) in info.planned_moves.iter().enumerate() {
       let destination = get (&movers, planned_move.1);
+      //printlnerr!("uh {:?} sddd {:?}", planned_move, destination);
       if destination.is_none() {
         let source = get (&movers, planned_move.0).unwrap();
         movers.insert (planned_move.0, None);
@@ -410,6 +429,7 @@ impl GenericNode {
           
           // we may try moving the blocking unit (at destination) out of the way first
           let mut new_info = info.clone();
+          new_info.steps += 1;
           let previous = new_info.planned_moves.iter().position (| k | k.1 == planned_move.1);
           // TODO: should we exclude changes that reduce the amount a unit is moving?
           let (blocker_original_location, insert_index) = match previous {
@@ -428,6 +448,7 @@ impl GenericNode {
           // we may also try continuing the movement of the blocked unit
           if let Some (moves_left) = state_globals.reaches [&planned_move.0].get(&adjacent) {
             let mut new_info = info.clone();
+            new_info.steps += 1;
             // all changes must increase the amount of movement, to avoid infinite loops
             let previous_moves_left = state_globals.reaches [&planned_move.0][&planned_move.1];
             if *moves_left < previous_moves_left {
@@ -440,11 +461,13 @@ impl GenericNode {
       }
     }
     for desired_move in info.desired_moves.iter() {
-      if self.state.geta (desired_move.1).unit.is_some() {
+      let destination = get (&movers, desired_move.1);
+      if destination.is_some() {
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, desired_move.1) {
           if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
           
           let mut new_info = info.clone();
+          new_info.steps += 1;
           if let Some (_moves_left) = state_globals.reaches [&desired_move.1].get(&adjacent) {
             new_info.planned_moves.insert (0, (desired_move.1, adjacent));
             self.push_new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
@@ -520,6 +543,7 @@ impl GenericNode {
 
 
   fn step_into (&mut self)->StepIntoResult {
+    //printlnerr!("{:?}", self.node_type);
     let scores = if let Some(scores) = self.state.scores.clone() {
       scores
     }
@@ -585,6 +609,7 @@ impl GenericNode {
             fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), attack);
             let mut new_child = self.new_child(ChooseAttack);
             new_child.set_state(state_after);
+            self.choices.push(new_child);
             self.choices.len() - 1
           }
           else {
@@ -601,10 +626,9 @@ impl GenericNode {
       let scores = match self.choices [choice].step_into () {
         PlayedOutWithScores(scores) => scores,
         TurnedOutToBeImpossible => {
-          match self.step_into() {
-            PlayedOutWithScores(scores) => scores,
-            TurnedOutToBeImpossible => return TurnedOutToBeImpossible,
-          }
+          self.choices.remove(choice);
+          if self.choices.is_empty() { return TurnedOutToBeImpossible; }
+          return self.step_into();
         },
       };
       
