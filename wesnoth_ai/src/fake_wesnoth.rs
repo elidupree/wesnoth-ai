@@ -122,6 +122,8 @@ pub struct State {
 impl State {
   pub fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}
   pub fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [((x-1)+(y-1)*self.map.width) as usize]}
+  pub fn geta (&self, coordinates: [i32; 2])->&Location {& self.get(coordinates[0], coordinates[1])}
+  pub fn geta_mut (&mut self, coordinates: [i32; 2])->&mut Location {& self.get_mut(coordinates[0], coordinates[1])}
   pub fn get_terrain_info (&self, x: i32,y: i32)->&TerrainInfo {self.map.config.terrain_info.get (self.get(x,y).terrain).unwrap()}
   pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies[other]}
 }

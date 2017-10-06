@@ -208,3 +208,321 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
   }
 }
 
+
+
+
+
+/*struct Attack {
+  src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
+}
+struct Move {
+  src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
+}*/
+#[derive (Clone, Hash, Serialize, Deserialize, Debug)]
+struct SpaceClearingMoves {
+  planned_moves: Vec<([i32; 2], [i32; 2])>,
+  desired_moves: Vec<([i32; 2], [i32; 2])>,
+  follow_up: GenericNodeType,
+}
+
+#[derive (Clone, Hash, Serialize, Deserialize, Debug)]
+enum GenericNodeType {
+  ChooseAttack,
+  ChooseHowToClearSpace(SpaceClearingMoves),
+  ExecuteAttack (fake_wesnoth::Move),
+  FinishTurnLazily (Option<fake_wesnoth::Move>),
+}
+
+#[derive (Serialize, Deserialize, Debug, Default)]
+pub struct GenericTurnGlobals {
+  pub rave_scores: Mutex<HashMap<GenericNodeType, RaveScore>>,
+}
+
+#[derive (Clone, Serialize, Deserialize, Debug)]
+pub struct StateGlobals {
+  pub reaches: HashMap<[i32;2], HashMap<[i32;2], i32>>
+}
+impl StateGlobals {
+  pub fn new (state: & State) {
+    StateGlobals {
+      reaches: self.state.locations.iter()
+        .filter_map (| location | location.unit.as_ref())
+        .map (| unit | fake_wesnoth::find_reach (state, unit).into_iter().collect()).collect()
+    }
+  }
+}
+
+struct GenericNode {
+  pub state: Arc<State>,
+  pub state_globals: StateGlobals,
+  pub turn: Arc<GenericTurnGlobals>,
+  pub tree: Arc<TreeGlobals>,
+  pub visits: i32,
+  pub total_score: f64,
+  pub choices: Vec<GenericNode>,
+  pub node_type: GenericNodeType,
+}
+
+enum StepIntoResult {
+  PlayedOutWithScores(Vec<f64>),
+  TurnedOutToBeImpossible,
+}
+
+impl GenericNode {
+  fn new_child(&self, node_type: GenericNodeType) -> GenericNode {
+    GenericNode {
+      state: self.state.clone(), turn: self.turn.clone(), tree: self.tree.clone(), state_globals: self.state_globals.clone(),
+      visits: 0, total_score: 0,
+      choices: Vec::new(),
+      node_type: node_type,
+    }
+  }
+  
+  fn set_state (&mut self, new_state: State) {
+    self.state = Arc::new(new_state);
+    self.state_globals = Arc::new(StateGlobals::new (&self.state));
+  }
+  
+  fn init_attack_choices (&mut self) {
+    for unit in self.state.locations.iter()
+        .filter_map (| location | location.unit.as_ref())
+        .filter(|unit| unit.side == self.state.current_side && unit.attacks_left > 0) {
+      for location in fake_wesnoth::find_reach (state, unit) {
+        let unit_there = state.get (location.0 [0], location.0 [1]).unit.as_ref();
+        if unit_there.map_or (false, | other | other.side != self.state.current_side) { continue; }
+        for adjacent in fake_wesnoth::adjacent_locations (& state.map, location.0) {
+          if let Some (neighbor) = state.get (adjacent [0], adjacent [1]).unit.as_ref() {
+            if !state.is_enemy (unit.side, neighbor.side) { continue; }
+            for index in 0..unit.unit_type.attacks.len() {
+              let attack = fake_wesnoth::Move::Attack {
+                src_x: location.0 [0], src_y: location.0 [1],
+                dst_x: location.0 [0], dst_y: location.0 [1],
+                attack_x: adjacent [0], attack_y: adjacent [1],
+                weapon: index,
+              };
+              self.choices.push (self.new_child (
+                GenericNodeType::ChooseHowToClearSpace(SpaceClearingMoves {
+                  desired_moves: vec![[[unit.x,unit.y],location.0]],
+                  planned_moves: Vec::new(),
+                  follow_up: ExecuteAttack(attack),
+                })
+              ));
+            }
+          }
+        }
+      }
+    }
+    self.choices.push (self.new_child (GenericNodeType::FinishTurnLazily(None)));
+  }
+  
+  fn init_clearspace_choices (&mut self) {
+    let troubled_state = (*self.state).clone(); 
+    let movers = HashMap::new();
+    let get = | movers, location | movers.get (location).unwrap_or (self.state.geta (location).unit);
+    for (index, planned_move) in info.planned_moves.iter().enumerate() {
+      let destination = get (movers, planned_move.1);
+      if destination.is_none() {
+        let source = get (movers, planned_move.0);
+        movers.replace (planned_move.0, None);
+        movers.insert (planned_move.1, Some(source));
+      }
+      else {
+        for adjacent in fake_wesnoth::adjacent_locations (& state.map, location.0) {
+          let unit_there = get (movers, adjacent);
+          if unit_there.map_or (false, | other | other.side != self.state.current_side) { continue; }
+          
+          // we may try moving the blocking unit (at destination) out of the way first
+          let new_info = info.clone();
+          let previous = new_info.moves.position (| k | k.1 == planned_move.1);
+          // TODO: should we exclude changes that reduce the amount a unit is moving?
+          let (blocker_original_location, insert_index) = match previous {
+            None => (planned_move.1, index, 0),
+            Some (previous) => (previous {new_info.moves.remove (previous).0, min(index, previous)),
+          };
+          if let Some (moves_left) = self.state_globals.reaches [blocker_original_location].get (adjacent) {
+            // all changes must increase the amount of movement, to avoid infinite loops
+            let previous_moves_left = self.state_globals.reaches [blocker_original_location][planned_move.1];
+            if moves_left < previous_moves_left {
+              new_info.moves.insert (insert_index, (blocker_original_location, adjacent));
+              self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
+            }
+          }
+          
+          // we may also try continuing the movement of the blocked unit
+          if let Some (moves_left) = self.state_globals.reaches [planned_move.0].get(adjacent) {
+            // all changes must increase the amount of movement, to avoid infinite loops
+            let previous_moves_left = self.state_globals.reaches [planned_move.0][planned_move.1];
+            if moves_left < previous_moves_left {
+              new_info.moves[index].1 = adjacent;
+              self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
+            }
+          }
+        }
+        return;
+      }
+    }
+    for desired_move in info.desired_moves.iter() {
+      if state.geta (move.1).unit.is_some() {
+        for adjacent in fake_wesnoth::adjacent_locations (& state.map, location.0) {
+          let unit_there = state.geta (adjacent).unit.as_ref();
+          if unit_there.map_or (false, | other | other.side != self.state.current_side) { continue; }
+          let new_info = info.clone();
+          if let Some (_moves_left) = self.state_globals.reaches [desired_move.1].get(adjacent) {
+            new_info.moves.insert (0, (desired_move.1, adjacent));
+            self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
+          }
+        }
+        return;
+      }
+    }
+    self.choices.push (self.new_child (self.follow_up.clone()));
+  }
+
+  fn update_choices (&mut self) {
+    self.choices = match self.node_type {
+      ChooseAttack => {
+        if self.choices.is_empty() {
+          self.init_attack_choices();
+        }
+      },
+      ChooseHowToClearSpace(ref info) => {
+        if self.choices.is_empty() {
+          self.init_clearspace_choices();
+        }
+      }
+      ExecuteAttack(attack) => ()
+      FinishTurnLazily(previous_action) => {
+        if self.choices.is_empty() {
+          match previous_action {
+            fake_wesnoth::Move::EndTurn=>{
+              self.choices.push (self.new_child (ChooseAttack));
+            },
+            _=> {
+          let next_move = self.state.locations.iter()
+            .filter_map (| location | location.unit.as_ref())
+            .flat_map (| unit | self.state_globals.reaches ([unit.x, unit.y]).iter().filter_map | (destination, moves_left | {
+              if unit_there.is_none() {
+                Some(fake_wesnoth::Move::Move {
+                  src_x: unit.x, src_y: unit.y,
+                  dst_x: destination [0], dst_y: destination [1],
+                  moves_left: moves_left
+                }))
+              }
+              else { None }
+            })
+            .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
+            .map (| action | (action,::naive_ai::evaluate_move (& self.state, action)))
+            .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
+            .unwrap().0;
+          
+          let mut state_after = (*self.state).clone();
+          fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & next_move);
+          
+          let new_child = self.new_child (FinishTurnLazily (Some (next_move)));
+          new_child.set_state(state_after);
+          self.choices.push (new_child);
+            },
+          };
+        }
+      }
+    }
+  }
+
+
+  fn step_into (&mut self)->StepIntoResult {
+    let scores = if let Some(scores) = node.state.scores.clone() {
+      scores
+    }
+    else if self.state.current_side == globals.starting_side && self.state.turn == globals.starting_turn + 3 {
+      ::naive_ai::evaluate_state(&self.state)
+    }
+    else {
+      self.update_choices ();
+      
+      
+      let c = 0.2; //2.0;
+      let c_log_visits = c*((self.visits+1) as f64).ln();
+      
+      let priority_state = self.state.clone();
+      let priority_turn = self.turn.clone();
+      let priority_type = self.node_type.clone();
+      let priority = | choice: &GenericNode| {
+        let mut rave_score = RaveScore { visits: 0, total_score: 0.0, };
+        
+        match (&priority_type, &choice.node_type) {
+          (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => {
+            if let Some(scores) = priority_turn.rave_scores.lock().unwrap().get(& info.follow_up).cloned() {
+              rave_score = scores;
+            }
+          },
+          _ => (),
+        };
+        let naive_weight = 0.000001;
+        let rave_weight = rave_score.visits as f64;
+        let exact_weight = (proposed.visits*proposed.visits) as f64;
+        let total_weight = naive_weight + rave_weight + exact_weight;
+               
+        let uncertainty_bonus = if rave_score.visits + proposed.visits == 0 { 100000.0 }
+          else { (c_log_visits/(
+            (if rave_score.visits > 6 {6.0} else {rave_score.visits as f64}/2.0)
+            + proposed.visits as f64
+          )).sqrt() };
+        
+        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action);
+        if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
+        let mut total_score = naive_score*(naive_weight/total_weight);
+        if rave_score.visits > 0 {
+          total_score += (rave_score.total_score/rave_score.visits as f64) * (rave_weight/total_weight);
+        }
+        if proposed.visits > 0 {
+          total_score += (proposed.total_score/proposed.visits as f64) * (exact_weight/total_weight);
+        }
+        total_score + uncertainty_bonus
+      };
+      let choice = match self.node_type {
+        ExecuteAttack(attack) => {
+          if self.choices.is_empty() || self.visits > (1<<self.choices.len()) {
+            let mut state_after = (*self.state).clone();
+            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & attack);
+            let new_child = self.new_child(ChooseAttack);
+            new_child.set_state(state_after);
+            self.choices.len() - 1
+          }
+          else {
+            rand::thread_rng().gen_range(0, self.choices.len())
+          }
+        },
+        _ => match (0, self.choices.len())
+          .max_by (|a,b| priority(self.choices[a]).partial_cmp(&priority(self.choices[b])).unwrap()) {
+          None => return TurnedOutToBeImpossible;
+          Some(k) => k,
+        },
+      };
+      
+      let scores = match self.choices [choice].step_into () {
+        PlayedOutWithScores(scores) => scores,
+        TurnedOutToBeImpossible => {
+          match self.step_into() {
+            PlayedOutWithScores(scores) => scores,
+            TurnedOutToBeImpossible => return TurnedOutToBeImpossible,
+          }
+        },
+      };
+      
+      scores
+    };
+    
+    self.total_score += scores[self.state.current_side];
+    self.visits += 1;
+    
+    if match self.node_type {ExecuteAttack(_)=>true,_=>false} {
+      let mut guard = self.turn.rave_scores.lock().unwrap();
+      let rave_score = guard.entry (choice.node_type).or_insert (RaveScore { visits: 0, total_score: 0.0, });
+      rave_score.total_score += scores[self.state.current_side];
+      rave_score.visits += 1;
+    }
+      
+    scores
+  }
+
+}
