@@ -374,7 +374,7 @@ impl GenericNode {
             if !self.state.is_enemy (unit.side, neighbor.side) { continue; }
             for index in 0..unit.unit_type.attacks.len() {
               let attack = fake_wesnoth::Move::Attack {
-                src_x: location.0 [0], src_y: location.0 [1],
+                src_x: unit.x, src_y: unit.y,
                 dst_x: location.0 [0], dst_y: location.0 [1],
                 attack_x: adjacent [0], attack_y: adjacent [1],
                 weapon: index,
@@ -596,10 +596,16 @@ else {
         total_score + uncertainty_bonus
       };
       let choice = match self.node_type {
-        ExecuteAttack(ref attack) => {
+        ExecuteAttack(fake_wesnoth::Move::Attack {
+                src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon,
+              }) => {
           if self.choices.is_empty() || self.visits > (1<<self.choices.len()) {
             let mut state_after = (*self.state).clone();
-            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), attack);
+            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), 
+              &fake_wesnoth::Move::Attack {
+                src_x: dst_x, src_y: dst_y, dst_x, dst_y, attack_x, attack_y, weapon,
+              }
+            );
             let mut new_child = self.new_child(ChooseAttack);
             new_child.set_state(state_after);
             self.choices.push(new_child);
