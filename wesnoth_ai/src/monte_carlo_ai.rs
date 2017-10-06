@@ -240,7 +240,7 @@ pub enum GenericNodeType {
   ChooseAttack,
   ChooseHowToClearSpace(SpaceClearingMoves),
   ExecuteAttack (fake_wesnoth::Move),
-  FinishTurnLazily (Option<fake_wesnoth::Move>),
+  FinishTurnLazily (Vec<fake_wesnoth::Move>),
 }
 use self::GenericNodeType::{ChooseAttack, ChooseHowToClearSpace, ExecuteAttack, FinishTurnLazily};
 
@@ -327,11 +327,9 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
         result.push (action);
         break;
       },
-      FinishTurnLazily (Some(action)) => {
-        result.push (action);
-        if let Some (&fake_wesnoth::Move::EndTurn) = result.last() {
-          break;
-        }
+      FinishTurnLazily (actions) => {
+        result.extend (actions);
+        break;
       },
       _=>(),
     };
@@ -400,7 +398,7 @@ else {
       }
     }
     self.choices.extend(new_children);
-    self.push_new_child (GenericNodeType::FinishTurnLazily(None));
+    self.push_new_child (GenericNodeType::FinishTurnLazily(Vec::new()));
   }
   
   fn init_clearspace_choices (&mut self) {
@@ -499,43 +497,38 @@ else {
         }
       }
       ExecuteAttack(_) => (),
-      FinishTurnLazily(previous_action) => {
+      FinishTurnLazily(_) => {
         if self.choices.is_empty() {
-          match previous_action {
-            Some(fake_wesnoth::Move::EndTurn)=>{
-              self.push_new_child (ChooseAttack);
-            },
-            _=> {
-          
-          let next_move = self.state.locations.iter()
-            .filter_map (| location | location.unit.as_ref())
-            .flat_map (| unit | {
-              let coords = [unit.x, unit.y];
-              let state_hack = self.state.clone();
-              self.state_globals.reaches [&[unit.x, unit.y]].iter().filter_map(move | (destination, moves_left) | {
-                if state_hack.geta(*destination).unit.is_none() {
-                  Some(fake_wesnoth::Move::Move {
-                    src_x: coords[0], src_y: coords[1],
-                    dst_x: destination [0], dst_y: destination [1],
-                    moves_left: *moves_left
-                  })
-                }
-                else { None }
-              })
-            })
-            .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
-            .map (| action | (action.clone(), ::naive_ai::evaluate_move (& self.state, &action)))
-            .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
-            .unwrap().0;
+          let mut moves = Vec::new();
+          let mut new_child = self.new_child (ChooseAttack);
           
           let mut state_after = (*self.state).clone();
-          fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & next_move);
-          
-          let mut new_child = self.new_child (FinishTurnLazily (Some (next_move)));
+          loop {
+            let action = state_after.locations.iter()
+              .filter_map (| location | location.unit.as_ref())
+              .filter(|unit| unit.side == state_after.current_side)
+              .flat_map (|unit| possible_unit_moves (&state_after, unit).into_iter())
+              .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
+              .filter_map(|action| {
+                match action {
+                  Move::Attack{..} => None,
+                  _=> Some((action.clone(), ::naive_ai::evaluate_move (& state_after, &action)))
+                }
+              })
+              .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
+              .unwrap().0;
+            
+            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & action);
+            moves.push (action.clone());
+            
+            match action {
+              fake_wesnoth::Move::EndTurn => break,
+              _=>(),
+            }
+          }
           new_child.set_state(state_after);
           self.choices.push (new_child);
-            },
-          };
+          self.node_type = FinishTurnLazily(moves);
         }
       }
     }
