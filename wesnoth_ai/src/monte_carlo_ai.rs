@@ -285,6 +285,10 @@ impl GenericNode {
       node_type: node_type,
     }
   }
+  fn push_new_child(&mut self, node_type: GenericNodeType) {
+    let new_child = self.new_child (node_type);
+    self.choices.push (new_child);
+  }
   
   fn set_state (&mut self, new_state: State) {
     self.state = Arc::new(new_state);
@@ -292,6 +296,7 @@ impl GenericNode {
   }
   
   fn init_attack_choices (&mut self) {
+    let mut new_children = Vec::new();
     for unit in self.state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
         .filter(|unit| unit.side == self.state.current_side && unit.attacks_left > 0) {
@@ -308,7 +313,7 @@ impl GenericNode {
                 attack_x: adjacent [0], attack_y: adjacent [1],
                 weapon: index,
               };
-              self.choices.push (self.new_child (
+              new_children.push(self.new_child (
                 GenericNodeType::ChooseHowToClearSpace(SpaceClearingMoves {
                   desired_moves: vec![([unit.x,unit.y],location.0)],
                   planned_moves: Vec::new(),
@@ -320,52 +325,56 @@ impl GenericNode {
         }
       }
     }
-    self.choices.push (self.new_child (GenericNodeType::FinishTurnLazily(None)));
+    self.choices.extend(new_children);
+    self.push_new_child (GenericNodeType::FinishTurnLazily(None));
   }
   
   fn init_clearspace_choices (&mut self) {
-    let movers = HashMap::new();
-    let get = | movers: HashMap<[i32;2], Option<[i32;2]>>, location | {
-      movers.get (location).cloned().unwrap_or_else (|| {
-        self.state.geta (*location).unit.map (| unit | [unit.x, unit.y])
+    let mut movers = HashMap::new();
+    let state_hack = self.state.clone();
+    let state_globals = self.state_globals.clone();
+    let get = | movers: &HashMap<[i32;2], Option<[i32;2]>>, location |->Option<[i32;2]> {
+      movers.get (&location).cloned().unwrap_or_else (|| {
+        state_hack.geta (location).unit.as_ref().map (| unit | [unit.x, unit.y])
       })
     };
-    let info = match self.node_type {ChooseHowToClearSpace(ref info) => info, _=>unreachable!()};
+    let info = match self.node_type {ChooseHowToClearSpace(ref info) => info.clone(), _=>unreachable!()};
     for (index, planned_move) in info.planned_moves.iter().enumerate() {
-      let destination = get (movers, &planned_move.1);
+      let destination = get (&movers, planned_move.1);
       if destination.is_none() {
-        let source = get (movers, &planned_move.0).unwrap();
+        let source = get (&movers, planned_move.0).unwrap();
         movers.insert (planned_move.0, None);
         movers.insert (planned_move.1, Some(source));
       }
       else {
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, planned_move.1) {
-          if self.state.geta (adjacent).unit.map_or (false, | other | other.side != self.state.current_side) { continue; }
+          if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
           
           // we may try moving the blocking unit (at destination) out of the way first
-          let new_info = info.clone();
+          let mut new_info = info.clone();
           let previous = new_info.planned_moves.iter().position (| k | k.1 == planned_move.1);
           // TODO: should we exclude changes that reduce the amount a unit is moving?
           let (blocker_original_location, insert_index) = match previous {
             None => (planned_move.1, index),
             Some (previous) => (new_info.planned_moves.remove (previous).0, min(index, previous)),
           };
-          if let Some (moves_left) = self.state_globals.reaches [&blocker_original_location].get (&adjacent) {
+          if let Some (moves_left) = state_globals.reaches [&blocker_original_location].get (&adjacent) {
             // all changes must increase the amount of movement, to avoid infinite loops
-            let previous_moves_left = self.state_globals.reaches [&blocker_original_location][&planned_move.1];
+            let previous_moves_left = state_globals.reaches [&blocker_original_location][&planned_move.1];
             if *moves_left < previous_moves_left {
               new_info.planned_moves.insert (insert_index, (blocker_original_location, adjacent));
-              self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info)));
+              self.push_new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
             }
           }
           
           // we may also try continuing the movement of the blocked unit
-          if let Some (moves_left) = self.state_globals.reaches [&planned_move.0].get(&adjacent) {
+          if let Some (moves_left) = state_globals.reaches [&planned_move.0].get(&adjacent) {
+            let mut new_info = info.clone();
             // all changes must increase the amount of movement, to avoid infinite loops
-            let previous_moves_left = self.state_globals.reaches [&planned_move.0][&planned_move.1];
+            let previous_moves_left = state_globals.reaches [&planned_move.0][&planned_move.1];
             if *moves_left < previous_moves_left {
               new_info.planned_moves[index].1 = adjacent;
-              self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info)));
+              self.push_new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
             }
           }
         }
@@ -375,61 +384,66 @@ impl GenericNode {
     for desired_move in info.desired_moves.iter() {
       if self.state.geta (desired_move.1).unit.is_some() {
         for adjacent in fake_wesnoth::adjacent_locations (& self.state.map, desired_move.1) {
-          let unit_there = self.state.geta (adjacent).unit.as_ref();
-          if unit_there.map_or (false, | other | other.side != self.state.current_side) { continue; }
-          let new_info = info.clone();
-          if let Some (_moves_left) = self.state_globals.reaches [&desired_move.1].get(&adjacent) {
+          if self.state.geta (adjacent).unit.as_ref().map_or (false, | other | other.side != self.state.current_side) { continue; }
+          
+          let mut new_info = info.clone();
+          if let Some (_moves_left) = state_globals.reaches [&desired_move.1].get(&adjacent) {
             new_info.planned_moves.insert (0, (desired_move.1, adjacent));
-            self.choices.push (self.new_child (GenericNodeType::ChooseHowToClearSpace(new_info)));
+            self.push_new_child (GenericNodeType::ChooseHowToClearSpace(new_info));
           }
         }
         return;
       }
     }
-    self.choices.push (self.new_child ((*info.follow_up).clone()));
+    self.push_new_child (*info.follow_up);
   }
 
   fn update_choices (&mut self) {
-    match self.node_type {
+    match self.node_type.clone() {
       ChooseAttack => {
         if self.choices.is_empty() {
           self.init_attack_choices();
         }
       },
-      ChooseHowToClearSpace(ref info) => {
+      ChooseHowToClearSpace(_) => {
         if self.choices.is_empty() {
           self.init_clearspace_choices();
         }
       }
-      ExecuteAttack(attack) => (),
+      ExecuteAttack(_) => (),
       FinishTurnLazily(previous_action) => {
         if self.choices.is_empty() {
           match previous_action {
             Some(fake_wesnoth::Move::EndTurn)=>{
-              self.choices.push (self.new_child (ChooseAttack));
+              self.push_new_child (ChooseAttack);
             },
             _=> {
+          
           let next_move = self.state.locations.iter()
             .filter_map (| location | location.unit.as_ref())
-            .flat_map (| unit | self.state_globals.reaches [&[unit.x, unit.y]].iter().filter_map(| (destination, moves_left) | {
-              if self.state.geta(*destination).unit.is_none() {
-                Some(fake_wesnoth::Move::Move {
-                  src_x: unit.x, src_y: unit.y,
-                  dst_x: destination [0], dst_y: destination [1],
-                  moves_left: *moves_left
-                })
-              }
-              else { None }
-            }))
+            .flat_map (| unit | {
+              let coords = [unit.x, unit.y];
+              let state_hack = self.state.clone();
+              self.state_globals.reaches [&[unit.x, unit.y]].iter().filter_map(move | (destination, moves_left) | {
+                if state_hack.geta(*destination).unit.is_none() {
+                  Some(fake_wesnoth::Move::Move {
+                    src_x: coords[0], src_y: coords[1],
+                    dst_x: destination [0], dst_y: destination [1],
+                    moves_left: *moves_left
+                  })
+                }
+                else { None }
+              })
+            })
             .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
-            .map (| action | (action,::naive_ai::evaluate_move (& self.state, &action)))
+            .map (| action | (action.clone(), ::naive_ai::evaluate_move (& self.state, &action)))
             .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
             .unwrap().0;
           
           let mut state_after = (*self.state).clone();
           fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & next_move);
           
-          let new_child = self.new_child (FinishTurnLazily (Some (next_move)));
+          let mut new_child = self.new_child (FinishTurnLazily (Some (next_move)));
           new_child.set_state(state_after);
           self.choices.push (new_child);
             },
@@ -500,11 +514,11 @@ impl GenericNode {
         total_score + uncertainty_bonus
       };
       let choice = match self.node_type {
-        ExecuteAttack(attack) => {
+        ExecuteAttack(ref attack) => {
           if self.choices.is_empty() || self.visits > (1<<self.choices.len()) {
             let mut state_after = (*self.state).clone();
-            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & attack);
-            let new_child = self.new_child(ChooseAttack);
+            fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), attack);
+            let mut new_child = self.new_child(ChooseAttack);
             new_child.set_state(state_after);
             self.choices.len() - 1
           }
@@ -537,7 +551,7 @@ impl GenericNode {
     
     if match self.node_type {ExecuteAttack(_)=>true,_=>false} {
       let mut guard = self.turn.rave_scores.lock().unwrap();
-      let rave_score = guard.entry (self.node_type).or_insert (RaveScore { visits: 0, total_score: 0.0, });
+      let rave_score = guard.entry (self.node_type.clone()).or_insert (RaveScore { visits: 0, total_score: 0.0, });
       rave_score.total_score += scores[self.state.current_side];
       rave_score.visits += 1;
     }
