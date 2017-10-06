@@ -183,7 +183,7 @@ pub fn recruit_hexes (state: & fake_wesnoth::State, source: [i32; 2])->Vec<[i32;
       discovered.insert (location);
     }
   }
-  discovered.into_iter().collect()
+  discovered.into_iter().filter(|&location| location != source).collect()
 }
 
 pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::Unit)->Vec<fake_wesnoth::Move> {
