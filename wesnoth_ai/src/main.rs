@@ -187,6 +187,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box 
     leader.x = map.starting_locations [index][0];
     leader.y = map.starting_locations [index][1];
     leader.side = index;
+    leader.id = 3333333+index;
     leader.moves = leader.unit_type.max_moves;
     leader.attacks_left = 1;
     leader.canrecruit = true;
@@ -208,6 +209,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box 
     turn: 1,
     max_turns: 10,
     scores: None,
+    next_id: 33333333,
   };
   for player in players.iter_mut() {
     player.turn_started (& state);

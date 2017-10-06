@@ -59,6 +59,7 @@ pub struct UnitType {
 pub struct Unit {
   pub x: i32,
   pub y: i32,
+  pub id: usize,
   pub side: usize,
   pub attacks_left: i32,
   pub canrecruit: bool,
@@ -117,6 +118,7 @@ pub struct State {
   pub time_of_day: i32,
   pub turn: i32,
   pub max_turns: i32,
+  pub next_id: usize,
   pub scores: Option <Vec<f64>>,
 }
 impl State {
@@ -203,6 +205,8 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
       unit.side = state.current_side;
       unit.x = dst_x;
       unit.y = dst_y;
+      unit.id = state.next_id;
+      state.next_id += 1;
       unit.moves = 0;
       unit.attacks_left = 0;
       state.sides [state.current_side].gold -= unit.unit_type.cost;
