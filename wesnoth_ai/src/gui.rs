@@ -75,9 +75,10 @@ struct DisplayedState {
   size: [f64; 2],
   state: Arc <fake_wesnoth::State>,
   text: String,
+  detail_text: String,
 }
 
-use conrod::{self, widget, Colorable, Positionable, Widget};
+use conrod::{self, widget, Colorable, Positionable, Sizeable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
 use monte_carlo_ai::DisplayableNode;
 pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
@@ -187,6 +188,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             size: size,
             state: node.state().unwrap_or(root.state().unwrap()),
             text: node.info_text(),
+            detail_text: node.detail_text(),
           });
         }
         depth += 1;
@@ -266,6 +268,13 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       }
       if let Some(displayed_state) = states_display.get(which_displayed) {
         draw_state (ui, &displayed_state.state, [0.0,200.0]);
+        widget::Text::new(&displayed_state.detail_text)
+          .color(side_color (displayed_state.state.current_side))
+          .font_size(18)
+          .w (WIDTH as f64 * 0.7)
+          .wrap_by_word()
+          .bottom_right_of(ui.window)
+          .set(ui.widget_id_generator().next(), ui);
       }
       if focused >= states_display.len() {focused = 0;}
       for (index, displayed_state) in states_display.iter().enumerate() {

@@ -19,6 +19,7 @@ pub trait DisplayableNode {
   fn visits(&self)->i32;
   fn state (&self)->Option<Arc<State>>;
   fn info_text (&self)->String;
+  fn detail_text (&self)->String {String::new()}
   fn descendants (&self)->Vec<&DisplayableNode>;
 }
 
@@ -268,6 +269,7 @@ impl StateGlobals {
   }
 }
 
+#[derive (Debug)]
 pub struct GenericNode {
   pub state: Arc<State>,
   pub state_globals: Arc<StateGlobals>,
@@ -283,6 +285,7 @@ impl DisplayableNode for GenericNode {
   fn visits(&self)->i32 {self.visits}
   fn state (&self)->Option<Arc<State>> {Some(self.state.clone())}
   fn info_text (&self)->String {format!("{:.2}\n{}", self.total_score/self.visits as f64, self.visits)}
+  fn detail_text (&self)->String {format!("{:?}", self.node_type)}
   fn descendants (&self)->Vec<&DisplayableNode> {
     self.choices.iter().map (| choice | choice as &DisplayableNode).collect()
   }
