@@ -570,13 +570,25 @@ impl GenericNode {
             let action = state_after.locations.iter()
               .filter_map (| location | location.unit.as_ref())
               .filter(|unit| unit.side == state_after.current_side)
-              .flat_map (|unit| possible_unit_moves (&state_after, unit).into_iter())
+              .flat_map (| unit | {
+                let coords = [unit.x, unit.y];
+                let state_after = &state_after;
+                fake_wesnoth::find_reach(&state_after, unit).into_iter().filter_map(move | (destination, moves_left) | {
+                  if state_after.geta(destination).unit.is_none() {
+                    Some(fake_wesnoth::Move::Move {
+                      src_x: coords[0], src_y: coords[1],
+                      dst_x: destination [0], dst_y: destination [1],
+                      moves_left: moves_left
+                    })
+                  }
+                  else {
+                    None
+                  }
+                })
+              })
               .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
-              .filter_map(|action| {
-                match action {
-                  Move::Attack{..} => None,
-                  _=> Some((action.clone(), ::naive_ai::evaluate_move (& state_after, &action)))
-                }
+              .map(|action| {
+                (action.clone(), ::naive_ai::evaluate_move (& state_after, &action))
               })
               .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
               .unwrap().0;
