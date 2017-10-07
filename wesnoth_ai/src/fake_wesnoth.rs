@@ -344,7 +344,7 @@ fn combatant_info (state: & State, unit: & Unit, opponent: & Unit, attack: Optio
         damage: round_damage (attack.damage, multiplier, 10000),
         slow_damage: round_damage (attack.damage, multiplier, 10000),
         chance: chance,
-        slow: attack. slow, poison: attack.poison,
+        slow: attack. slow, poison: attack.poison && !opponent.unit_type.not_living,
       }
     },
   }
