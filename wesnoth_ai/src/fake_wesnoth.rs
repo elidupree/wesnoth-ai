@@ -276,13 +276,11 @@ pub fn choose_defender_weapon (state: & State, attacker: & Unit, defender: & Uni
   let mut best_index = usize::max_value();
   let mut best_score = -100000000000.0;
   for (index, attack) in matching_attacks() {
-    if attack.range == attacker_attack.range {
-      let stats = simulate_combat (state, attacker, defender, weapon, index);
-      let score = defender_weapon_score (&stats);
-      if score >best_score {
-        best_score = score;
-        best_index = index;
-      }
+    let stats = simulate_combat (state, attacker, defender, weapon, index);
+    let score = defender_weapon_score (&stats);
+    if score >best_score {
+      best_score = score;
+      best_index = index;
     }
   }
   best_index
