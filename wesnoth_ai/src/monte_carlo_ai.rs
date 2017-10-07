@@ -265,6 +265,7 @@ impl StateGlobals {
     StateGlobals {
       reaches: state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
+        .filter (| unit | unit.side == state.current_side)
         .map (| unit |
           (
             [unit.x, unit.y],
