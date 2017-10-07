@@ -283,6 +283,7 @@ pub struct GenericNode {
   pub tree: Arc<TreeGlobals>,
   pub visits: i32,
   pub total_score: f64,
+  pub naive_score: f64,
   pub choices: Vec<GenericNode>,
   pub node_type: GenericNodeType,
 }
@@ -314,6 +315,7 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
     state_globals: Arc::new(StateGlobals::new (state)),
     visits: 0,
     total_score: 0.0,
+    naive_score: 0.0,
     choices: Vec::new(),
     node_type: ChooseAttack, 
   };
@@ -365,6 +367,7 @@ impl GenericNode {
     GenericNode {
       state: self.state.clone(), turn: self.turn.clone(), tree: self.tree.clone(), state_globals: self.state_globals.clone(),
       visits: 0, total_score: 0.0,
+      naive_score: 0.0,
       choices: Vec::new(),
       node_type: node_type,
     }
@@ -426,7 +429,7 @@ impl GenericNode {
                 attack_x: adjacent [0], attack_y: adjacent [1],
                 weapon: index,
               });
-              new_children.push(self.new_child (
+              let mut new_child = self.new_child (
                 if location.0 == [unit.x,unit.y] {
                   attack
                 }
@@ -439,7 +442,9 @@ impl GenericNode {
                     steps: 0,
                   })
                 }
-              ));
+              );
+              new_child.naive_score = ::naive_ai::evaluate_move (&self.state, &fake_wesnoth::Move::Attack {src_x: unit.x, src_y: unit.y, dst_x: location.0 [0], dst_y: location.0 [1], attack_x: adjacent [0], attack_y: adjacent [1], weapon: index, });
+              new_children.push(new_child);
             }
           }
         }
@@ -630,7 +635,6 @@ impl GenericNode {
       let priority_type = self.node_type.clone();
       let priority = | choice: &GenericNode| {
         let mut rave_score = RaveScore { visits: 0, total_score: 0.0, };
-        let mut naive_score = 0.0;
         
         if let Some((src, attack)) = match (&priority_type, &choice.node_type) {
             (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => 
@@ -647,7 +651,6 @@ impl GenericNode {
             rave_score = scores;
           }
           let Attack { unit_id, dst_x, dst_y, attack_x, attack_y, weapon,} = attack;
-          naive_score = ::naive_ai::evaluate_move (&priority_state, &fake_wesnoth::Move::Attack {src_x: src[0], src_y: src[1], dst_x, dst_y, attack_x, attack_y, weapon, });
         }
         if let Some(recruit) = match (&priority_type, &choice.node_type) {
           (&ChooseAttack, &ChooseHowToClearSpace(ref info)) => 
@@ -676,8 +679,8 @@ impl GenericNode {
             + choice.visits as f64
           )).sqrt() };
         
-        if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
-        let mut total_score = naive_score*(naive_weight/total_weight);
+        if choice.naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
+        let mut total_score = choice.naive_score*(naive_weight/total_weight);
         if rave_score.visits > 0 {
           total_score += (rave_score.total_score/rave_score.visits as f64) * (rave_weight/total_weight);
         }
