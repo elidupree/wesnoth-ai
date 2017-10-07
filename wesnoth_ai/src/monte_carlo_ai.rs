@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::cmp::min;
 use std::any::Any;
 use std::fmt::{self,Debug};
+use std::iter::once;
 
 use fake_wesnoth;
 use rust_lua_shared::*;
@@ -404,14 +405,10 @@ impl GenericNodeType for ExecuteAttack {
                 unit_id, dst_x, dst_y, attack_x, attack_y, weapon,
               } = self.attack;
     if node.choices.is_empty() || node.visits > (1<<node.choices.len()) {
-      let mut state_after = (*node.state).clone();
-      fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), 
-        &fake_wesnoth::Move::Attack {
-          src_x: dst_x, src_y: dst_y, dst_x, dst_y, attack_x, attack_y, weapon,
-        }
-      );
       let mut new_child = node.new_child(ChooseAttack);
-      new_child.set_state(state_after);
+      new_child.do_moves_on_state(once (fake_wesnoth::Move::Attack {
+        src_x: dst_x, src_y: dst_y, dst_x, dst_y, attack_x, attack_y, weapon,
+      }));
       Some((node.choices.len(), vec![new_child]))
     }
     else {
@@ -431,10 +428,8 @@ impl GenericNodeType for ExecuteAttack {
 impl GenericNodeType for ExecuteRecruit {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
     let mut new_child = node.new_child (ChooseAttack);
-    let mut state_after = (*node.state).clone();
     let Recruit{dst_x,dst_y,unit_type} = self.recruit.clone();
-    fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type});
-    new_child.set_state(state_after);
+    new_child.do_moves_on_state(once (fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type}));
     (vec![new_child], None)
   }
   fn export_moves (&self, node: &GenericNode) -> Vec<fake_wesnoth::Move> {
@@ -472,7 +467,7 @@ impl GenericNodeType for FinishTurnLazily {
     let mut new_child = node.new_child (ChooseAttack);
     
     let mut state_after = (*node.state).clone();
-    //let mut reaches = node.state_globals.reaches.clone();
+    let mut reaches = node.state_globals.reaches.clone();
     loop {
             let action = state_after.locations.iter()
               .filter_map (| location | location.unit.as_ref())
@@ -480,12 +475,12 @@ impl GenericNodeType for FinishTurnLazily {
               .flat_map (| unit | {
                 let coords = [unit.x, unit.y];
                 let state_after = &state_after;
-                fake_wesnoth::find_reach(&state_after, unit).into_iter().filter_map(move | (destination, moves_left) | {
-                  if state_after.geta(destination).unit.is_none() {
+                reaches[&coords].iter().filter_map(move | (destination, moves_left) | {
+                  if state_after.geta(*destination).unit.is_none() {
                     Some(fake_wesnoth::Move::Move {
                       src_x: coords[0], src_y: coords[1],
                       dst_x: destination [0], dst_y: destination [1],
-                      moves_left: moves_left
+                      moves_left: *moves_left
                     })
                   }
                   else {
@@ -507,6 +502,7 @@ impl GenericNodeType for FinishTurnLazily {
               fake_wesnoth::Move::EndTurn => break,
               _=>(),
             }
+            update_reaches_after_move (&mut reaches, & state_after, & action);
     }
     new_child.set_state(state_after);
     (vec![new_child], Some(Box::new(FinishTurnLazily(moves))))
@@ -597,11 +593,7 @@ impl GenericNodeType for ChooseHowToClearSpace {
     let final_moves = self.finalize();
     let wesnoth_moves = final_moves.to_wesnoth_moves();
     let mut new_child = node.new_child_dynamic ((*self.follow_up)(final_moves));
-    let mut state_after = (*node.state).clone();
-    for action in wesnoth_moves {
-      fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & action);
-    }
-    new_child.set_state(state_after);
+    new_child.do_moves_on_state(wesnoth_moves.into_iter());
     result.push (new_child);
     (result, None)
   }
@@ -653,7 +645,13 @@ pub fn update_reaches_after_move (reaches: &mut HashMap<[i32;2], HashMap<[i32;2]
       reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, state.get(dst_x, dst_y).unit.as_ref().unwrap()).into_iter().collect());
     },
     &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
-      ::std::mem::replace(reaches, generate_reaches(state));
+      if state.get (attack_x, attack_y).unit.is_none() {
+        ::std::mem::replace(reaches, generate_reaches(state));
+      }
+      else {
+        reaches.remove (&[src_x, src_y]);
+        reaches.insert ([dst_x, dst_y], ::std::iter::once(([dst_x, dst_y], 0)).collect());
+      }
     },
     &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
       reaches.insert ([dst_x, dst_y], ::std::iter::once(([dst_x, dst_y], 0)).collect());
@@ -752,6 +750,17 @@ impl GenericNode {
     self.state = Arc::new(new_state);
     self.state_globals = Arc::new(StateGlobals::new (&self.state));
   }
+  fn do_moves_on_state <I: Iterator<Item=fake_wesnoth::Move>>(&mut self, actions: I) {
+    let mut state_after = (*self.state).clone();
+    let mut reaches = (*self.state_globals).reaches.clone();
+    for action in actions {
+      fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & action);
+      update_reaches_after_move (&mut reaches, &state_after, & action);
+    }
+    self.state = Arc::new(state_after);
+    self.state_globals = Arc::new(StateGlobals {reaches});
+  }
+
   
   fn step_into (&mut self)->StepIntoResult {
     //printlnerr!("{:?}", self.node_type);
