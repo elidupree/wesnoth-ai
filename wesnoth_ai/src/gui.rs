@@ -171,6 +171,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         for (mut node, size) in frontier {
           let diff = size[1]-size[0];
           let mut descendants = node.descendants();
+          descendants.retain (| descendant | descendant.visits() != 0);
           descendants.sort_by_key (|a| a.visits());
           let mut prior_visits = Cell::new(0);
           let node_visits = node.visits();
