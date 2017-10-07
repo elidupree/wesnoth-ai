@@ -605,14 +605,40 @@ pub fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {
   return ::std::cmp::max (horizontal, vertical + horizontal/2);
 }
 
-pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
+#[derive (Clone, Serialize, Deserialize, Debug)]
+pub struct Reach {
+  radius: i32,
+  diameter: usize,
+  center: [i32; 2],
+  map: Vec<i32>,
+  pub list: Vec<([i32; 2], i32)>,
+}
+impl Reach {
+  fn index (&self, location: [i32;2])->usize {
+    (self.radius + location[0] - self.center [0]) as usize * self.diameter + (self.radius + location[1] - self.center [1]) as usize
+  }
+  fn in_bounds (&self, location: [i32; 2])->bool {
+    (location[0] - self.center [0]).abs() <= self.radius &&
+    (location[1] - self.center [1]).abs() <= self.radius
+  }
+  pub fn get (&self, location: [i32; 2])->Option <i32> {
+    if !self.in_bounds (location) {return None}
+    let result = self.map [self.index (location)];
+    if result == i32::max_value() {return None}
+    Some (result)
+  }
+}
+
+pub fn find_reach (state: & State, unit: & Unit)->Reach {
   let mut frontiers = vec![Vec::new(); (unit.moves + 1) as usize];
   let diameter = (unit.moves*2+1) as usize;
-  let mut discovered = vec![false; diameter*diameter];
-  let discovered_index = | location: [i32;2] |->usize {
-    (unit.moves + location[0] - unit.x) as usize * diameter + (unit.moves + location[1] - unit.y) as usize
+  let mut result = Reach {
+    radius: unit.moves,
+    diameter,
+    center: [unit.x, unit.y],
+    map: vec![i32::max_value(); diameter*diameter],
+    list: Vec::with_capacity (diameter*diameter),
   };
-  let mut results = Vec::new();
   frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
@@ -620,8 +646,8 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
         let stuff = state.get (adjacent [0], adjacent [1]);
         let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
         if remaining < 0 { continue; }
-        let discovered_index = discovered_index(adjacent);
-        if discovered[discovered_index] { continue; }
+        let discovered_index = result.index(adjacent);
+        if result.map [discovered_index] != i32::max_value() { continue; }
         if stuff.unit.as_ref().map_or (false, | neighbor | state.is_enemy (unit.side, neighbor.side)) { continue; }
         
         if remaining > 0 && !unit.unit_type.skirmisher {
@@ -632,16 +658,19 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
             }
           }
         }
-        discovered[discovered_index] = true;
+        result.map [discovered_index] = remaining;
         frontiers [remaining as usize].push (adjacent);
       }
       let stuff = state.get (location [0], location [1]);
       let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
       let capture = info.village && stuff.village_owner != Some(unit.side);
-      results.push ((location, if capture {0} else {moves_left}));
+      let final_moves_left = if capture {0} else {moves_left};
+      let index = result.index(location);
+      result.map [index] = final_moves_left;
+      result.list.push ((location, final_moves_left));
     }
   }
-  results
+  result
 }
 
 pub fn total_income (state: & State, side: usize)->i32 {

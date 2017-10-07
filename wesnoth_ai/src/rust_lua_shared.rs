@@ -191,7 +191,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
   
   let mut results = vec![];
 
-  for location in fake_wesnoth::find_reach (state, unit) {
+  for location in fake_wesnoth::find_reach (state, unit).list {
     let unit_there = state.get (location.0 [0], location.0 [1]).unit.as_ref();
     if unit_there.is_none() {
       results.push (fake_wesnoth::Move::Move {

@@ -258,7 +258,7 @@ fn to_wesnoth_move (state_globals: &StateGlobals, locations: ([i32; 2], [i32; 2]
   fake_wesnoth::Move::Move {
     src_x: locations.0[0], src_y: locations.0[1],
     dst_x: locations.1[0], dst_y: locations.1[1],
-    moves_left: state_globals.reaches[&locations.0][&locations.1]
+    moves_left: state_globals.reaches[&locations.0].get (locations.1).unwrap()
   }
 }
 
@@ -321,7 +321,7 @@ impl GenericNodeType for ChooseAttack {
     for unit in node.state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
         .filter(|unit| unit.side == node.state.current_side && unit.attacks_left > 0) {
-      for location in fake_wesnoth::find_reach (&node.state, unit) {
+      for location in node.state_globals.reaches [& [unit.x, unit.y]].list.iter() {
         if node.state.get (location.0 [0], location.0 [1]).unit.as_ref().map_or (false, | other | other.side != node.state.current_side) { continue; }
         
         if unit.canrecruit {
@@ -475,12 +475,12 @@ impl GenericNodeType for FinishTurnLazily {
               .flat_map (| unit | {
                 let coords = [unit.x, unit.y];
                 let state_after = &state_after;
-                reaches[&coords].iter().filter_map(move | (destination, moves_left) | {
-                  if state_after.geta(*destination).unit.is_none() {
+                reaches[&coords].list.iter().filter_map(move | &(destination, moves_left) | {
+                  if state_after.geta(destination).unit.is_none() {
                     Some(fake_wesnoth::Move::Move {
                       src_x: coords[0], src_y: coords[1],
                       dst_x: destination [0], dst_y: destination [1],
-                      moves_left: *moves_left
+                      moves_left: moves_left
                     })
                   }
                   else {
@@ -548,22 +548,22 @@ impl GenericNodeType for ChooseHowToClearSpace {
             None => (planned_move.1, index),
             Some (previous) => (new_info.plan.planned_moves.remove (previous).0, min(index, previous)),
           };
-          if let Some (moves_left) = state_globals.reaches [&blocker_original_location].get (&adjacent) {
+          if let Some (moves_left) = state_globals.reaches [&blocker_original_location].get (adjacent) {
             // all changes must increase the amount of movement, to avoid infinite loops
-            let previous_moves_left = state_globals.reaches [&blocker_original_location][&planned_move.1];
-            if *moves_left < previous_moves_left {
+            let previous_moves_left = state_globals.reaches [&blocker_original_location].get (planned_move.1).unwrap();
+            if moves_left < previous_moves_left {
               new_info.plan.planned_moves.insert (insert_index, (blocker_original_location, adjacent));
               result.push (node.new_child (new_info));
             }
           }
           
           // we may also try continuing the movement of the blocked unit
-          if let Some (moves_left) = state_globals.reaches [&planned_move.0].get(&adjacent) {
+          if let Some (moves_left) = state_globals.reaches [&planned_move.0].get(adjacent) {
             let mut new_info = self.clone();
             new_info.steps += 1;
             // all changes must increase the amount of movement, to avoid infinite loops
-            let previous_moves_left = state_globals.reaches [&planned_move.0][&planned_move.1];
-            if *moves_left < previous_moves_left {
+            let previous_moves_left = state_globals.reaches [&planned_move.0].get (planned_move.1).unwrap();
+            if moves_left < previous_moves_left {
               new_info.plan.planned_moves[index].1 = adjacent;
               result.push (node.new_child (new_info));
             }
@@ -581,7 +581,7 @@ impl GenericNodeType for ChooseHowToClearSpace {
           
           let mut new_info = self.clone();
           new_info.steps += 1;
-          if let Some (_moves_left) = state_globals.reaches [&desired_empty].get(&adjacent) {
+          if let Some (_moves_left) = state_globals.reaches [&desired_empty].get(adjacent) {
             new_info.plan.planned_moves.insert (0, (desired_empty, adjacent));
             result.push (node.new_child (new_info));
           }
@@ -616,7 +616,7 @@ pub struct TurnRaveScores {
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct StateGlobals {
-  pub reaches: HashMap<[i32;2], HashMap<[i32;2], i32>>
+  pub reaches: HashMap<[i32;2], fake_wesnoth::Reach>
 }
 impl StateGlobals {
   pub fn new (state: & State)->StateGlobals {
@@ -626,23 +626,23 @@ impl StateGlobals {
   }
 }
 
-pub fn generate_reaches(state: & State)->HashMap<[i32;2], HashMap<[i32;2], i32>> {
+pub fn generate_reaches(state: & State)->HashMap<[i32;2], fake_wesnoth::Reach> {
   state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
         .filter (| unit | unit.side == state.current_side)
         .map (| unit |
           (
             [unit.x, unit.y],
-            fake_wesnoth::find_reach (state, unit).into_iter().collect()
+            fake_wesnoth::find_reach (state, unit)
           )
         ).collect()
 }
 
-pub fn update_reaches_after_move (reaches: &mut HashMap<[i32;2], HashMap<[i32;2], i32>>, state: & State, action: & fake_wesnoth::Move) {
+pub fn update_reaches_after_move (reaches: &mut HashMap<[i32;2], fake_wesnoth::Reach>, state: & State, action: & fake_wesnoth::Move) {
   match action {
     &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
       reaches.remove (&[src_x, src_y]);
-      reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, state.get(dst_x, dst_y).unit.as_ref().unwrap()).into_iter().collect());
+      reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, state.get(dst_x, dst_y).unit.as_ref().unwrap()));
     },
     &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
       if state.get (attack_x, attack_y).unit.is_none() {
@@ -650,11 +650,13 @@ pub fn update_reaches_after_move (reaches: &mut HashMap<[i32;2], HashMap<[i32;2]
       }
       else {
         reaches.remove (&[src_x, src_y]);
-        reaches.insert ([dst_x, dst_y], ::std::iter::once(([dst_x, dst_y], 0)).collect());
+        if let Some(unit) = state.get(dst_x, dst_y).unit.as_ref() {
+          reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, unit));
+        }
       }
     },
     &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
-      reaches.insert ([dst_x, dst_y], ::std::iter::once(([dst_x, dst_y], 0)).collect());
+      reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, state.get(dst_x, dst_y).unit.as_ref().unwrap()));
     },
     &fake_wesnoth::Move::EndTurn => {
       ::std::mem::replace(reaches, generate_reaches(state));
