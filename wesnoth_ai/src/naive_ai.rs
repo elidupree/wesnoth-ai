@@ -137,7 +137,7 @@ impl Player {
         };
         evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}, accurate) + random::<f64>() + stats_badness (&defender, &stats.combatants [1]) - stats_badness (&attacker, &stats.combatants [0])
       }
-      &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
+      &fake_wesnoth::Move::Recruit {dst_x, dst_y, unit_type} => {
         let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
         example.side = state.current_side;
         example.x = dst_x;

@@ -33,11 +33,12 @@ pub struct Attack {
 pub struct Side {
   pub gold: i32,
   pub enemies: SmallVec<[bool;6]>,
-  pub recruits: Arc<SmallVec<[String; 12]>>,
+  pub recruits: Arc<SmallVec<[usize; 12]>>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct UnitType {
+  pub type_name: String,
   pub alignment: i32,
   pub cost: i32,
   pub level: i32,
@@ -91,13 +92,13 @@ pub struct TerrainInfo{
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Faction {
-  pub recruits: Arc<SmallVec<[String; 12]>>,
-  pub leaders: Vec<String>,
+  pub recruits: Arc<SmallVec<[usize; 12]>>,
+  pub leaders: Vec<usize>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
-  pub unit_type_examples: HashMap <String, Unit>,
+  pub unit_type_examples: Vec <Unit>,
   pub terrain_info: Vec<TerrainInfo>,
   pub factions: Vec<Faction>,
 }
@@ -141,7 +142,7 @@ pub enum Move {
     src_x: i32, src_y: i32, dst_x: i32, dst_y: i32, attack_x: i32, attack_y: i32, weapon: usize,
   },
   Recruit {
-    dst_x: i32, dst_y: i32, unit_type: String,
+    dst_x: i32, dst_y: i32, unit_type: usize,
   },
   EndTurn,
 }
@@ -203,7 +204,7 @@ pub fn apply_move (state: &mut State, players: &mut Vec<Box <Player>>, input: & 
         player.attack_completed (state, & attacker, & defender, new_attacker.as_ref().map (| unit | &**unit), new_defender.as_ref().map (| unit | &**unit));
       }
     }
-    &Move::Recruit {dst_x, dst_y, ref unit_type} => {
+    &Move::Recruit {dst_x, dst_y, unit_type} => {
       let mut unit = Box::new (state.map.config.unit_type_examples.get (unit_type).unwrap().clone());
       unit.side = state.current_side;
       unit.x = dst_x;

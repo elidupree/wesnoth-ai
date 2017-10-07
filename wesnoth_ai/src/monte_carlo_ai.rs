@@ -226,7 +226,7 @@ pub struct Attack {
 }
 #[derive (Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct Recruit {
-  dst_x: i32, dst_y: i32, unit_type: String,
+  dst_x: i32, dst_y: i32, unit_type: usize,
 }
 /*struct Move {
   src_x: i32, src_y: i32, dst_x: i32, dst_y: i32,
@@ -329,7 +329,7 @@ impl GenericNodeType for ChooseAttack {
             let unit_on_recruit_location = node.state.geta (recruit_location).unit.as_ref();
             if unit_on_recruit_location.map_or (false, | other | other.side != node.state.current_side) { continue; }
             
-            for recruit in node.state.sides [unit.side].recruits.iter() {
+            for &recruit in node.state.sides [unit.side].recruits.iter() {
               if node.state.sides [unit.side].gold < node.state.map.config.unit_type_examples.get (recruit).unwrap().unit_type.cost { continue; }
               let action = Recruit {
                 dst_x: recruit_location [0], dst_y: recruit_location [1],
@@ -610,7 +610,7 @@ pub struct GenericTurnGlobals {
 #[derive (Serialize, Deserialize, Debug, Default)]
 pub struct TurnRaveScores {
   pub attacks: HashMap<Attack, RaveScore>,
-  pub recruit_types: HashMap <String, RaveScore>,
+  pub recruit_types: HashMap <usize, RaveScore>,
   pub recruit_locations: HashMap <[i32; 2], RaveScore>,
 }
 

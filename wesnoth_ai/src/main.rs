@@ -183,7 +183,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box 
   let mut sides = Vec::new();
   for (index, _) in players.into_iter().enumerate() {
     let faction = rand::thread_rng().choose (&map.config.factions).unwrap();
-    let mut leader = Box::new (map.config.unit_type_examples.get (rand::thread_rng().choose (&faction.leaders).unwrap()).unwrap().clone());
+    let mut leader = Box::new (map.config.unit_type_examples.get (rand::thread_rng().choose (&faction.leaders).unwrap().clone()).unwrap().clone());
     leader.x = map.starting_locations [index][0];
     leader.y = map.starting_locations [index][1];
     leader.side = index;

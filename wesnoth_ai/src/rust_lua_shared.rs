@@ -154,7 +154,7 @@ pub fn neural_wesnoth_move (state: &fake_wesnoth::State, input: & fake_wesnoth::
       }
 
     }
-    &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
+    &fake_wesnoth::Move::Recruit {dst_x, dst_y, unit_type} => {
       let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
       example.side = state.current_side;
       example.x = dst_x;
@@ -219,7 +219,7 @@ pub fn possible_unit_moves(state: & fake_wesnoth::State, unit: & fake_wesnoth::U
   }
   if unit.canrecruit {
     for location in recruit_hexes (state, [unit.x, unit.y]).into_iter().filter (| location | state.get (location [0], location [1]). unit.is_none()) {
-      for recruit in state.sides [unit.side].recruits.iter() {
+      for &recruit in state.sides [unit.side].recruits.iter() {
         if state.sides [unit.side].gold >= state.map.config.unit_type_examples.get (recruit).unwrap().unit_type.cost {
           results.push (fake_wesnoth::Move::Recruit {
             dst_x: location [0], dst_y: location [1],
