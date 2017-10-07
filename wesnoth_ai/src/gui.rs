@@ -114,6 +114,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let (ai_sender, ai_receiver) = channel();
   let (tree_sender, tree_receiver) = channel();
   let mut proceeding = false;//true;
+  let mut replacing_tree = true;
   
   let mut states_display = Vec::new();
   let mut which_displayed = 0;
@@ -160,7 +161,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         send_to_lua (&path, response);
       }
     }
-    if let Ok(root) = tree_receiver.try_recv() {
+    if replacing_tree { if let Ok(root) = tree_receiver.try_recv() {
       //let layers = Vec::new();
       states_display.clear();
       let mut frontier = vec![(&root as &DisplayableNode, [0.0, 1.0])];
@@ -195,7 +196,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         frontier = next_frontier;
       }
       redraw = true;
-    }
+    }}
     
     events.clear();
     events_loop.poll_events(|event| {events.push (event) ;});
@@ -221,6 +222,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             } => {
               match code {
                 glium::glutin::VirtualKeyCode::A => {proceeding = !proceeding;}
+                glium::glutin::VirtualKeyCode::S => {replacing_tree = !replacing_tree; proceeding = false;}
                 _=>(),
               }
             },
