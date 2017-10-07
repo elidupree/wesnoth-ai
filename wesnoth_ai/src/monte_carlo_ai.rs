@@ -263,7 +263,13 @@ pub struct StateGlobals {
 impl StateGlobals {
   pub fn new (state: & State)->StateGlobals {
     StateGlobals {
-      reaches: state.locations.iter()
+      reaches: generate_reaches(state)
+    }
+  }
+}
+
+pub fn generate_reaches(state: & State)->HashMap<[i32;2], HashMap<[i32;2], i32>> {
+  state.locations.iter()
         .filter_map (| location | location.unit.as_ref())
         .filter (| unit | unit.side == state.current_side)
         .map (| unit |
@@ -272,9 +278,26 @@ impl StateGlobals {
             fake_wesnoth::find_reach (state, unit).into_iter().collect()
           )
         ).collect()
-    }
-  }
 }
+
+pub fn update_reaches_after_move (reaches: &mut HashMap<[i32;2], HashMap<[i32;2], i32>>, state: & State, action: & fake_wesnoth::Move) {
+  match action {
+    &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
+      reaches.remove (&[src_x, src_y]);
+      reaches.insert ([dst_x, dst_y], fake_wesnoth::find_reach (state, state.get(dst_x, dst_y).unit.as_ref().unwrap()).into_iter().collect());
+    },
+    &fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+      ::std::mem::replace(reaches, generate_reaches(state));
+    },
+    &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
+      reaches.insert ([dst_x, dst_y], ::std::iter::once(([dst_x, dst_y], 0)).collect());
+    },
+    &fake_wesnoth::Move::EndTurn => {
+      ::std::mem::replace(reaches, generate_reaches(state));
+    },
+  };
+}
+
 
 #[derive (Debug)]
 pub struct GenericNode {
@@ -572,6 +595,7 @@ impl GenericNode {
           let mut new_child = self.new_child (ChooseAttack);
           
           let mut state_after = (*self.state).clone();
+          //let mut reaches = self.state_globals.reaches.clone();
           loop {
             let action = state_after.locations.iter()
               .filter_map (| location | location.unit.as_ref())
