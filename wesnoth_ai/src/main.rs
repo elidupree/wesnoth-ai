@@ -193,7 +193,7 @@ fn generate_starting_state (map: Arc <fake_wesnoth::Map>, players: &mut Vec<Box 
     leader.canrecruit = true;
     let location_index =((leader.x-1)+(leader.y-1)*map.width) as usize;
     locations [location_index].unit = Some (leader);
-    let mut enemies = vec![true, true]; enemies[index] = false;
+    let mut enemies = smallvec::SmallVec::from_vec(vec![true, true]); enemies[index] = false;
     sides.push (fake_wesnoth::Side {
       gold: 40,
       enemies: enemies,

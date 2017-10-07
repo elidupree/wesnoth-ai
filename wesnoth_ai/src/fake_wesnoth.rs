@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::cmp::{min, max};
+use arrayvec::ArrayVec;
+use smallvec::SmallVec;
 use rand::{self, Rng};
 
 
@@ -30,8 +32,8 @@ pub struct Attack {
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Side {
   pub gold: i32,
-  pub enemies: Vec<bool>,
-  pub recruits: Vec<String>,
+  pub enemies: SmallVec<[bool;6]>,
+  pub recruits: Arc<SmallVec<[String; 12]>>,
 }
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
@@ -89,7 +91,7 @@ pub struct TerrainInfo{
 
 #[derive (Clone, Serialize, Deserialize, Debug)]
 pub struct Faction {
-  pub recruits: Vec<String>,
+  pub recruits: Arc<SmallVec<[String; 12]>>,
   pub leaders: Vec<String>,
 }
 
@@ -421,8 +423,6 @@ pub fn combat_results (state: & State, attacker: & Unit, defender: & Unit, weapo
 
 // TODO: slow, etc.
 
-use smallvec::SmallVec;
-use arrayvec::ArrayVec;
 #[derive (Clone, Debug)]
 pub struct CombatantStats {
   pub info: CombatantInfo,

@@ -9,7 +9,6 @@ serde_derive = "1.0"
 serde_json = "1.0"
 crossbeam = "0.2"
 glium = "0.17"
-smallvec = "0.4"
 arrayvec = "0.4"
 
 [dependencies.conrod]
@@ -19,6 +18,10 @@ features = ["glium", "winit"]
 [dependencies.serde]
 version = "1.0"
 features = ["rc"]
+
+[dependencies.smallvec]
+version = "0.4"
+features = ["serde"]
 
 [profile.dev]
 opt-level = 3
