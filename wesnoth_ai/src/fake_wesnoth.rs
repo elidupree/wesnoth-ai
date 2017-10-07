@@ -531,6 +531,54 @@ pub fn simulate_combat (state: & State, attacker: & Unit, defender: & Unit, atta
   stats
 }
 
+/// Like simulate_combat, but faster and less accurate.
+pub fn guess_combat (state: & State, attacker: & Unit, defender: & Unit, attacker_weapon: usize, defender_weapon: usize)->CombatStats {
+  if defender_weapon == CHOOSE_WEAPON {
+    let attacker_attack = &attacker.unit_type.attacks [attacker_weapon];
+    let matching_attacks = || defender.unit_type.attacks.iter().enumerate().filter (| &(_, attack) | attack.range == attacker_attack.range);
+    if matching_attacks().count() > 1 {
+      return matching_attacks().map (|(index, _attack)| {
+        let stats = guess_combat (state, attacker, defender, attacker_weapon, index);
+        let score = defender_weapon_score (&stats);
+        (stats, score)
+      }).max_by (| a,b | a.1.partial_cmp(&b.1).unwrap()).unwrap().0;
+    }
+  }
+  
+  let (mut ac, mut dc) = make_combatants (state, attacker, defender, attacker_weapon, defender_weapon, |unit, other, attack, other_attack, info | {
+    CombatantStats {
+      info: info,
+      original_hitpoints: unit.hitpoints,
+      hits_to_die: other_attack.map_or (1, | other_attack| ((unit.hitpoints+other_attack.damage-1) / other_attack.damage) as usize),
+      average_hitpoints: 0.0,
+      death_chance: 0.0,
+    }
+  });
+  
+  fn finish (me: &mut CombatantStats, other: &mut CombatantStats ) {
+    let average_hits = other.info.swings as f64*(other.info.chance as f64/100.0);
+    if me.hits_to_die <= other.info.swings as usize {
+      let hits_to_die = me.hits_to_die as f64;
+      if average_hits > hits_to_die {
+        me.death_chance = 1.0 - hits_to_die / average_hits / 2.0;
+      }
+      else {
+        me.death_chance = average_hits / hits_to_die / 2.0;
+      }
+    }
+    me.average_hitpoints = me.original_hitpoints as f64 - average_hits*other.info.damage as f64;
+    let deadish_hitpoints = (1.0-me.death_chance) * (0.5*me.original_hitpoints as f64);
+    if deadish_hitpoints > me.average_hitpoints { me.average_hitpoints = deadish_hitpoints; }
+  }
+  finish (&mut ac, &mut dc);
+  finish (&mut dc, &mut ac);
+  
+  CombatStats {
+    possibilities: SmallVec::new(),
+    combatants: [ac, dc],
+  }
+}
+
 pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->ArrayVec<[[i32; 2]; 6]> {
   let mut result = ArrayVec::new();
   {

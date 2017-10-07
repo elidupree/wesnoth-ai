@@ -47,7 +47,7 @@ impl Player {
       if let Some (unit) = location.unit.as_ref() {
         if self.unit_moves [index].is_none() && unit.side == state.current_side {
           self.unit_moves [index] = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
-            let evaluation = evaluate_move (state, &action);
+            let evaluation = evaluate_move (state, &action, true);
             (action, evaluation)
           }).collect());
         }
@@ -99,7 +99,7 @@ impl Player {
     result
   }
   
-  pub fn evaluate_move (state: & State, input: & fake_wesnoth::Move)->f64 {
+  pub fn evaluate_move (state: & State, input: & fake_wesnoth::Move, accurate: bool)->f64 {
     match input {
       &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
         let unit = state.get (src_x, src_y).unit.as_ref().unwrap();
@@ -130,8 +130,12 @@ impl Player {
         attacker.x = dst_x;
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
-        let stats = fake_wesnoth::simulate_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON);
-        evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}) + random::<f64>() + stats_badness (&defender, &stats.combatants [1]) - stats_badness (&attacker, &stats.combatants [0])
+        let stats = if accurate {
+          fake_wesnoth::simulate_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON)
+        } else {
+          fake_wesnoth::guess_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON)
+        };
+        evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}, accurate) + random::<f64>() + stats_badness (&defender, &stats.combatants [1]) - stats_badness (&attacker, &stats.combatants [0])
       }
       &fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
         let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();

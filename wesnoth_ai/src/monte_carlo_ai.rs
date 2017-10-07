@@ -162,7 +162,7 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
             + proposed.visits as f64
           )).sqrt() };
         
-        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action);
+        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action, false);
         if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
         let mut total_score = naive_score*(naive_weight/total_weight);
         if rave_score.visits > 0 {
@@ -444,7 +444,7 @@ impl GenericNode {
                   })
                 }
               );
-              new_child.naive_score = ::naive_ai::evaluate_move (&self.state, &fake_wesnoth::Move::Attack {src_x: unit.x, src_y: unit.y, dst_x: location.0 [0], dst_y: location.0 [1], attack_x: adjacent [0], attack_y: adjacent [1], weapon: index, });
+              new_child.naive_score = ::naive_ai::evaluate_move (&self.state, &fake_wesnoth::Move::Attack {src_x: unit.x, src_y: unit.y, dst_x: location.0 [0], dst_y: location.0 [1], attack_x: adjacent [0], attack_y: adjacent [1], weapon: index, }, false);
               new_children.push(new_child);
             }
           }
@@ -594,7 +594,7 @@ impl GenericNode {
               })
               .chain(::std::iter::once (fake_wesnoth::Move::EndTurn))
               .map(|action| {
-                (action.clone(), ::naive_ai::evaluate_move (& state_after, &action))
+                (action.clone(), ::naive_ai::evaluate_move (& state_after, &action, false))
               })
               .max_by (|a,b| a.1.partial_cmp(&b.1).unwrap())
               .unwrap().0;
