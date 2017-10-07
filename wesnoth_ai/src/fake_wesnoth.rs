@@ -559,7 +559,11 @@ pub fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {
 
 pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
   let mut frontiers = vec![Vec::new(); (unit.moves + 1) as usize];
-  let mut discovered = HashSet::new();
+  let diameter = (unit.moves*2+1) as usize;
+  let mut discovered = vec![false; diameter*diameter];
+  let discovered_index = | location: [i32;2] |->usize {
+    (unit.moves + location[0] - unit.x) as usize * diameter + (unit.moves + location[1] - unit.y) as usize
+  };
   let mut results = Vec::new();
   frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
@@ -567,18 +571,21 @@ pub fn find_reach (state: & State, unit: & Unit)->Vec<([i32; 2], i32)> {
       for adjacent in adjacent_locations (& state.map, location) {
         let stuff = state.get (adjacent [0], adjacent [1]);
         let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
-        if remaining >= 0 && !discovered.contains (&adjacent) && stuff.unit.as_ref().map_or (true, | neighbor | !state.is_enemy (unit.side, neighbor.side)) {
-          if remaining > 0 && !unit.unit_type.skirmisher {
-            for double_adjacent in adjacent_locations (& state.map, adjacent) {
-              if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
-                remaining = 0;
-                break;
-              }
+        if remaining < 0 { continue; }
+        let discovered_index = discovered_index(adjacent);
+        if discovered[discovered_index] { continue; }
+        if stuff.unit.as_ref().map_or (false, | neighbor | state.is_enemy (unit.side, neighbor.side)) { continue; }
+        
+        if remaining > 0 && !unit.unit_type.skirmisher {
+          for double_adjacent in adjacent_locations (& state.map, adjacent) {
+            if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
+              remaining = 0;
+              break;
             }
           }
-          discovered.insert (adjacent);
-          frontiers [remaining as usize].push (adjacent);
         }
+        discovered[discovered_index] = true;
+        frontiers [remaining as usize].push (adjacent);
       }
       let stuff = state.get (location [0], location [1]);
       let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
