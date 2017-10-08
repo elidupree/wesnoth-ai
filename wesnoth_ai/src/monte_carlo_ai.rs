@@ -780,7 +780,7 @@ impl GenericNode {
     /*else if self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn + 3 {
       ::naive_ai::evaluate_state(&self.state)
     }*/
-    else if self.visits == 0 {
+    else if self.visits == 0 && !(self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn) {
       let mut playout_state = (*self.state).clone();
       while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 30 {
         let turn = playout_state.turn;
