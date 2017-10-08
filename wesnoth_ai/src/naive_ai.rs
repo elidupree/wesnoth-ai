@@ -256,9 +256,9 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
           let distance_1 = info.locations [index (state, src_x, src_y)].distance_to_target;
           let distance_2 = info.locations [index (state, dst_x, dst_y)].distance_to_target;
           let yay = distance_1 - distance_2 - 2;
-          printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
+          //printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
           if yay > 0 {
-            printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
+            //printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
             return evaluation + 5.0+yay as f64
           }
         }
@@ -289,11 +289,18 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     info.locations [index (state, unit.x, unit.y)].choices.push (result);
   }
   fn reevaluate_action (info: &mut Info, state: & State, action: & Action) {
+    if !action.valid.get() { return }
     let mut new_action = (*action).clone();
     action.valid.set (false);
     new_action.evaluation = evaluate (info, state, & action.action);
     let new_action = Rc::new(new_action);
     info.actions.push (ActionReference (new_action.clone())) ;
+    match action.action {
+      fake_wesnoth::Move::Attack {attack_x, attack_y, ..} => {
+        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (new_action.clone());
+      },
+      _=>()
+    }
     info.locations [index (state, action.source[0], action.source[1])].choices.push (new_action);
   }
   fn generate_reach (info: &mut Info, state: & State, unit: & Unit) {
@@ -394,6 +401,9 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
             let index = index(state, source[0], source[1]);
             if info.locations [index].last_update < info.last_update {
               info.locations [index].last_update = info.last_update;
+              for other_action in info.locations [index].choices.drain(..) {
+                other_action.valid.set (false);
+              }
               generate_reach (info, state, state.geta (source).unit.as_ref().unwrap());
             }
           }
@@ -420,6 +430,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
         Some(a)=>a,
         _=>{
           result.push (fake_wesnoth::Move::EndTurn);
+          fake_wesnoth::apply_move (state, &mut Vec::new(), & fake_wesnoth::Move::EndTurn) ;
           return result
         },
       };
@@ -448,6 +459,9 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     
     info.actions.extend (temporarily_invalid_choices);
     fake_wesnoth::apply_move (state, &mut Vec::new(), & choice.action) ;
+    if state.scores.is_some() {
+      return result
+    }
     update_info_after_move (&mut info, &*state, & choice) ;
   }
 }

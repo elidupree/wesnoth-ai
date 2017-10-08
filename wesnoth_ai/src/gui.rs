@@ -140,15 +140,16 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let _ = tree_sender.send (player.last_root.unwrap());
         */
         
-        /*
+        
         let (root, moves) = monte_carlo_ai::choose_moves (& state);
         let _ = sender.send (moves);
         let _ = tree_sender.send (root);
-        */
         
+        /*
         let mut mutstate = (*state).clone();
         let moves = naive_ai::play_turn_fast (&mut mutstate, true, true);
         let _ = sender.send (moves);
+        */
       });
       
       //hack 

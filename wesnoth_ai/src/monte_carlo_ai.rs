@@ -467,7 +467,7 @@ impl GenericNodeType for FinishTurnLazily {
     let mut new_child = node.new_child (ChooseAttack);
     
     let mut state_after = (*node.state).clone();
-    let mut reaches = node.state_globals.reaches.clone();
+    /*let mut reaches = node.state_globals.reaches.clone();
     loop {
             let action = state_after.locations.iter()
               .filter_map (| location | location.unit.as_ref())
@@ -503,7 +503,8 @@ impl GenericNodeType for FinishTurnLazily {
               _=>(),
             }
             update_reaches_after_move (&mut reaches, & state_after, & action);
-    }
+    }*/
+    moves = ::naive_ai::play_turn_fast(&mut state_after, false, false);
     new_child.set_state(state_after);
     (vec![new_child], Some(Box::new(FinishTurnLazily(moves))))
   }
@@ -769,8 +770,15 @@ impl GenericNode {
     let scores = if let Some(scores) = self.state.scores.clone() {
       scores
     }
-    else if self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn + 3 {
+    /*else if self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn + 3 {
       ::naive_ai::evaluate_state(&self.state)
+    }*/
+    else if self.visits == 0 {
+      let mut playout_state = (*self.state).clone();
+      while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 30 {
+        ::naive_ai::play_turn_fast (&mut playout_state, true, false);
+      }
+      playout_state.scores.clone().unwrap_or_else (|| ::naive_ai::evaluate_state(&playout_state))
     }
     else {
       if self.choices.is_empty() {
