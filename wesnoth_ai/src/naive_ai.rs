@@ -47,7 +47,7 @@ impl Player {
       if let Some (unit) = location.unit.as_ref() {
         if self.unit_moves [index].is_none() && unit.side == state.current_side {
           self.unit_moves [index] = Some (possible_unit_moves (state, unit).into_iter().map (| action | {
-            let evaluation = evaluate_move (state, &action, true);
+            let evaluation = evaluate_move (state, &action, Default::default());
             (action, evaluation)
           }).collect());
         }
@@ -98,8 +98,19 @@ impl Player {
     }
     result
   }
-  
-  pub fn evaluate_move (state: & State, input: & fake_wesnoth::Move, accurate: bool)->f64 {
+
+#[derive (Copy, Clone)]
+pub struct EvaluateMoveParameters {
+  pub accurate_combat: bool,
+  pub aggression: f64,
+}
+impl Default for EvaluateMoveParameters {
+  fn default()->Self {EvaluateMoveParameters {
+    accurate_combat: true,
+    aggression: 1.0,
+  }}
+}
+  pub fn evaluate_move (state: & State, input: & fake_wesnoth::Move, parameters: EvaluateMoveParameters)->f64 {
     match input {
       &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
         let unit = state.get (src_x, src_y).unit.as_ref().unwrap();
@@ -130,12 +141,12 @@ impl Player {
         attacker.x = dst_x;
         attacker.y = dst_y;
         let defender = state.get (attack_x, attack_y).unit.as_ref().unwrap();
-        let stats = if accurate {
+        let stats = if parameters.accurate_combat {
           fake_wesnoth::simulate_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON)
         } else {
           fake_wesnoth::guess_combat (state, &attacker, defender, weapon, fake_wesnoth::CHOOSE_WEAPON)
         };
-        evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}, accurate) + random::<f64>() + stats_badness (&defender, &stats.combatants [1]) - stats_badness (&attacker, &stats.combatants [0])
+        evaluate_move (state, &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left: 0}, parameters) + random::<f64>() + stats_badness (&defender, &stats.combatants [1]) - parameters.aggression*stats_badness (&attacker, &stats.combatants [0])
       }
       &fake_wesnoth::Move::Recruit {dst_x, dst_y, unit_type} => {
         let mut example = state.map.config.unit_type_examples.get (unit_type).unwrap().clone();
@@ -199,7 +210,7 @@ pub struct PlayTurnFastParameters {
   pub stop_at_combat: bool,
   pub exploit_kills: bool,
   pub pursue_villages: bool,
-  pub aggression: f64,
+  pub evaluate_move_parameters: EvaluateMoveParameters,
 }
 impl Default for PlayTurnFastParameters {
   fn default()->Self {PlayTurnFastParameters {
@@ -207,7 +218,7 @@ impl Default for PlayTurnFastParameters {
     stop_at_combat: false,
     exploit_kills: false,
     pursue_villages: true,
-    aggression: 1.0,
+    evaluate_move_parameters: Default::default(),
   }}
 }
 
@@ -266,7 +277,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
   };
   
   fn evaluate (info: &Info, state: & State, action: & Move)-> f64 {
-    let evaluation = evaluate_move (state, & action, false);
+    let evaluation = evaluate_move (state, & action, info.parameters.evaluate_move_parameters);
     match action {
       &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, ..} => {
         if !state.get (src_x, src_y).unit.as_ref().unwrap().canrecruit {
@@ -367,7 +378,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
         target_frontier.push ([unit.x, unit.y]);
       }
     }
-    if state.map.config.terrain_info [location.terrain].village && location.village_owner.map_or (true, | owner | state.is_enemy (owner, state.current_side)) {
+    if info.parameters.pursue_villages && state.map.config.terrain_info [location.terrain].village && location.village_owner.map_or (true, | owner | state.is_enemy (owner, state.current_side)) {
       info.locations [index (state, x,y)].distance_to_target = 0;
       target_frontier.push ([x,y]);
     }

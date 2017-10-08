@@ -170,7 +170,10 @@ impl<LookaheadPlayer: Fn(&State, usize)->Box<fake_wesnoth::Player>> Player<Looka
             + proposed.visits as f64
           )).sqrt() };
         
-        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action, false);
+        let naive_score = ::naive_ai::evaluate_move (&priority_state, &proposed.action, naive_ai::EvaluateMoveParameters {
+          accurate_combat: false,
+          .. Default::default()
+        });
         if naive_score.abs() > 10000.0 { printlnerr!("Warning: unexpectedly high naive eval"); }
         let mut total_score = naive_score*(naive_weight/total_weight);
         if rave_score.visits > 0 {
@@ -377,7 +380,7 @@ impl GenericNodeType for ChooseAttack {
                     steps: 0,
                   })
                 };
-              new_child.naive_score = ::naive_ai::evaluate_move (&node.state, &fake_wesnoth::Move::Attack {src_x: unit.x, src_y: unit.y, dst_x: location.0 [0], dst_y: location.0 [1], attack_x: adjacent [0], attack_y: adjacent [1], weapon: index, }, false);
+              new_child.naive_score = ::naive_ai::evaluate_move (&node.state, &fake_wesnoth::Move::Attack {src_x: unit.x, src_y: unit.y, dst_x: location.0 [0], dst_y: location.0 [1], attack_x: adjacent [0], attack_y: adjacent [1], weapon: index, }, naive_ai::EvaluateMoveParameters { .. Default::default() });
               new_children.push(new_child);
             }
           }
@@ -780,13 +783,21 @@ impl GenericNode {
     else if self.visits == 0 {
       let mut playout_state = (*self.state).clone();
       while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 30 {
+        let turn = playout_state.turn;
         ::naive_ai::play_turn_fast (&mut playout_state, naive_ai::PlayTurnFastParameters{
           allow_combat: true,
           stop_at_combat: false,
           exploit_kills: false,
+          pursue_villages: turn < self.tree.starting_turn + 4,
+          evaluate_move_parameters: naive_ai::EvaluateMoveParameters {
+            accurate_combat: false,
+            aggression: 2.0,
+            .. Default::default()
+          },
           .. Default::default()
         });
       }
+      //printlnerr!(" Playout ran until {:?}", playout_state.turn);
       playout_state.scores.clone().unwrap_or_else (|| ::naive_ai::evaluate_state(&playout_state))
     }
     else {

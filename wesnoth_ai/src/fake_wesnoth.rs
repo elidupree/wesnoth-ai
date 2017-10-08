@@ -629,7 +629,12 @@ impl Reach {
 }
 
 pub fn find_reach (state: & State, unit: & Unit)->Reach {
-  let mut frontiers = vec![Vec::new(); (unit.moves + 1) as usize];
+  let mut frontiers = Vec::with_capacity (unit.moves + 1);
+  for moves_taken in (1..(unit.moves+1)).rev() {
+    frontiers.push (Vec::with_capacity (moves_taken*6));
+  }
+  frontiers.push (Vec::with_capacity (1));
+  
   let diameter = (unit.moves*2+1) as usize;
   let mut result = Reach {
     radius: unit.moves,
