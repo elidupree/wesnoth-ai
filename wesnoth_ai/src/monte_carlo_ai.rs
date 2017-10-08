@@ -9,6 +9,7 @@ use std::fmt::{self,Debug};
 use std::iter::once;
 
 use fake_wesnoth;
+use naive_ai;
 use rust_lua_shared::*;
 
 
@@ -504,7 +505,10 @@ impl GenericNodeType for FinishTurnLazily {
             }
             update_reaches_after_move (&mut reaches, & state_after, & action);
     }*/
-    moves = ::naive_ai::play_turn_fast(&mut state_after, false, false);
+    moves = ::naive_ai::play_turn_fast(&mut state_after, naive_ai::PlayTurnFastParameters{
+      allow_combat: false,
+      .. Default::default()
+    });
     new_child.set_state(state_after);
     (vec![new_child], Some(Box::new(FinishTurnLazily(moves))))
   }
@@ -776,7 +780,12 @@ impl GenericNode {
     else if self.visits == 0 {
       let mut playout_state = (*self.state).clone();
       while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 30 {
-        ::naive_ai::play_turn_fast (&mut playout_state, true, false);
+        ::naive_ai::play_turn_fast (&mut playout_state, naive_ai::PlayTurnFastParameters{
+          allow_combat: true,
+          stop_at_combat: false,
+          exploit_kills: false,
+          .. Default::default()
+        });
       }
       playout_state.scores.clone().unwrap_or_else (|| ::naive_ai::evaluate_state(&playout_state))
     }

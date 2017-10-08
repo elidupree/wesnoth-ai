@@ -194,7 +194,24 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 use smallvec::SmallVec;
 
-pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bool)->Vec<Move> {
+pub struct PlayTurnFastParameters {
+  pub allow_combat: bool,
+  pub stop_at_combat: bool,
+  pub exploit_kills: bool,
+  pub pursue_villages: bool,
+  pub aggression: f64,
+}
+impl Default for PlayTurnFastParameters {
+  fn default()->Self {PlayTurnFastParameters {
+    allow_combat: false,
+    stop_at_combat: false,
+    exploit_kills: false,
+    pursue_villages: true,
+    aggression: 1.0,
+  }}
+}
+
+pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->Vec<Move> {
   #[derive (Clone)]
   struct Action {
     evaluation: f64,
@@ -215,7 +232,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     locations: Vec<LocationInfo>,
     actions: BinaryHeap <ActionReference>,
     last_update: usize,
-    allow_combat: bool,
+    parameters: PlayTurnFastParameters,
   }
   
   impl Ord for ActionReference {
@@ -245,7 +262,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     }; state.locations.len()],
     actions: BinaryHeap::new(),
     last_update: 0,
-    allow_combat
+    parameters
   };
   
   fn evaluate (info: &Info, state: & State, action: & Move)-> f64 {
@@ -313,7 +330,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
           src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1], moves_left: 0
         });
       }
-      if info.allow_combat && unit.attacks_left >0 {
+      if info.parameters.allow_combat && unit.attacks_left >0 {
         for adjacent in fake_wesnoth::adjacent_locations (& state.map, location) {
           if let Some(neighbor) = state.geta (adjacent).unit.as_ref() {
             if state.is_enemy (unit.side, neighbor.side) {
@@ -328,7 +345,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
         }
       }
     }
-    if info.allow_combat && unit.canrecruit {
+    if info.parameters.allow_combat && unit.canrecruit {
       for location in recruit_hexes (state, [unit.x, unit.y]) {
         for & recruit in state.sides [unit.side].recruits.iter() {
           if state.sides [unit.side].gold >= state.map.config.unit_type_examples [recruit].unit_type.cost {
@@ -394,7 +411,8 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
         for other_action in info.locations [index (state, action.source [0], action.source [1])].choices.drain(..) {
           other_action.valid.set (false);
         }
-        if state.get (attack_x, attack_y).unit.is_none() {
+        let killed = state.get (attack_x, attack_y).unit.is_none();
+        if killed && info.parameters.exploit_kills {
           let modified: Vec<_> = info.locations [index(state, attack_x, attack_y)].moves_attacking.drain(..).filter (|m|m.valid.get()).map (| m| m.source).collect();
           info.last_update += 1;
           for source in modified {
@@ -408,9 +426,14 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
             }
           }
         }
+        else if killed {
+          for other_action in ::std::mem::replace(&mut info.locations [index(state, attack_x, attack_y)].moves_attacking, Vec::new()) {
+            other_action.valid.set (false);
+          }
+        }
         else {
-          for action in ::std::mem::replace(&mut info.locations [index(state, attack_x, attack_y)].moves_attacking, Vec::new()) {
-            reevaluate_action (info, state, &action);
+          for other_action in ::std::mem::replace(&mut info.locations [index(state, attack_x, attack_y)].moves_attacking, Vec::new()) {
+            reevaluate_action (info, state, &other_action);
           }
         }
       },
@@ -453,7 +476,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     }
     
     result.push (choice.action.clone() );
-    if stop_at_combat && match choice.action {fake_wesnoth::Move::Attack {..} => true, _=>false} {
+    if info.parameters.stop_at_combat && match choice.action {fake_wesnoth::Move::Attack {..} => true, _=>false} {
       return result
     }
     

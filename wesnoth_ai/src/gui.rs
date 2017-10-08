@@ -147,7 +147,11 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         
         /*
         let mut mutstate = (*state).clone();
-        let moves = naive_ai::play_turn_fast (&mut mutstate, true, true);
+        let moves = naive_ai::play_turn_fast (&mut mutstate, naive_ai::PlayTurnFastParameters {
+          allow_combat: true,
+          stop_at_combat: true,
+          .. Default::default()
+        });
         let _ = sender.send (moves);
         */
       });
