@@ -629,8 +629,8 @@ impl Reach {
 }
 
 pub fn find_reach (state: & State, unit: & Unit)->Reach {
-  let mut frontiers = Vec::with_capacity (unit.moves + 1);
-  for moves_taken in (1..(unit.moves+1)).rev() {
+  let mut frontiers = Vec::with_capacity (unit.moves as usize + 1);
+  for moves_taken in (1..(unit.moves as usize+1)).rev() {
     frontiers.push (Vec::with_capacity (moves_taken*6));
   }
   frontiers.push (Vec::with_capacity (1));
