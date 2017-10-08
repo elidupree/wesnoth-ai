@@ -113,7 +113,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut redraw = true;
   let (ai_sender, ai_receiver) = channel();
   let (tree_sender, tree_receiver) = channel::<monte_carlo_ai::GenericNode>();
-  let mut proceeding = false;//true;
+  let mut proceeding = true;
   let mut replacing_tree = true;
   
   let mut states_display = Vec::new();

@@ -89,7 +89,7 @@ impl Player {
     let defense = *unit.unit_type.defense.get (location.terrain).unwrap() as f64;
     result -= defense / 10.0;
     if terrain_info.healing > 0 {
-      let healing = ::std::cmp::max(terrain_info.healing, unit.unit_type.max_hitpoints - unit.hitpoints);
+      let healing = ::std::cmp::min(terrain_info.healing, unit.unit_type.max_hitpoints - unit.hitpoints);
       result += healing as f64 - 0.8;
     }
     if unit.canrecruit {
@@ -204,11 +204,12 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     valid: Cell<bool>,
   }
   struct ActionReference (Rc<Action>);
-  #[derive (Clone, Default)]
+  #[derive (Clone)]
   struct LocationInfo {
     choices: Vec<Rc<Action>>,
     moves_attacking: Vec<Rc<Action>>,
     last_update: usize,
+    distance_to_target: i32,
   }
   struct Info {
     locations: Vec<LocationInfo>,
@@ -236,14 +237,38 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
   
   fn index (state: & State, x: i32,y: i32)->usize {((x-1)+(y-1)*state.map.width) as usize}
   let mut info = Info {
-    locations: vec![Default::default(); state.locations.len()],
+    locations: vec![LocationInfo {
+      choices: Vec::new(),
+      moves_attacking: Vec::new(),
+      last_update: 0,
+      distance_to_target: i32::max_value(),
+    }; state.locations.len()],
     actions: BinaryHeap::new(),
-    last_update: usize::default(),
+    last_update: 0,
     allow_combat
   };
   
-  fn generate_action (info: &mut Info, state: & State, unit: & Unit, action: Move) {
+  fn evaluate (info: &Info, state: & State, action: & Move)-> f64 {
     let evaluation = evaluate_move (state, & action, false);
+    match action {
+      &fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, ..} => {
+        if !state.get (src_x, src_y).unit.as_ref().unwrap().canrecruit {
+          let distance_1 = info.locations [index (state, src_x, src_y)].distance_to_target;
+          let distance_2 = info.locations [index (state, dst_x, dst_y)].distance_to_target;
+          let yay = distance_1 - distance_2 - 2;
+          printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
+          if yay > 0 {
+            printlnerr!("{:?}", ((src_x, src_y), distance_1, ( dst_x, dst_y), distance_2));
+            return evaluation + 5.0+yay as f64
+          }
+        }
+      },
+      _=>(),
+    }
+    evaluation
+  }
+  fn generate_action (info: &mut Info, state: & State, unit: & Unit, action: Move) {
+    let evaluation = evaluate (info, state, & action);
     if evaluation < 0.0 {return}
     let result = Rc::new (Action {
       evaluation, action: action.clone(), valid: Cell::new (true), source: [unit.x, unit.y],
@@ -266,7 +291,7 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
   fn reevaluate_action (info: &mut Info, state: & State, action: & Action) {
     let mut new_action = (*action).clone();
     action.valid.set (false);
-    new_action.evaluation = evaluate_move (state, & action.action, false);
+    new_action.evaluation = evaluate (info, state, & action.action);
     let new_action = Rc::new(new_action);
     info.actions.push (ActionReference (new_action.clone())) ;
     info.locations [index (state, action.source[0], action.source[1])].choices.push (new_action);
@@ -276,9 +301,11 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     for &(location, moves_left) in reach.list.iter() {
       if state.geta (location).unit.as_ref().map_or (false, | unit | unit.side != state.current_side || unit.moves == 0) {continue}
       
-      generate_action (info, state, unit, fake_wesnoth::Move::Move {
-        src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1], moves_left: 0
-      });
+      if location != [unit.x, unit.y] {
+        generate_action (info, state, unit, fake_wesnoth::Move::Move {
+          src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1], moves_left: 0
+        });
+      }
       if info.allow_combat && unit.attacks_left >0 {
         for adjacent in fake_wesnoth::adjacent_locations (& state.map, location) {
           if let Some(neighbor) = state.geta (adjacent).unit.as_ref() {
@@ -297,17 +324,56 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
     if info.allow_combat && unit.canrecruit {
       for location in recruit_hexes (state, [unit.x, unit.y]) {
         for & recruit in state.sides [unit.side].recruits.iter() {
-          generate_action (info, state, unit, fake_wesnoth::Move::Recruit{
-            dst_x: location [0], dst_y: location [1], unit_type: recruit
-          });
+          if state.sides [unit.side].gold >= state.map.config.unit_type_examples [recruit].unit_type.cost {
+            generate_action (info, state, unit, fake_wesnoth::Move::Recruit{
+              dst_x: location [0], dst_y: location [1], unit_type: recruit
+            });
+          }
         }
       }
     }
   }
   
-  for unit in state.locations.iter().filter_map (| location | location.unit.as_ref()) {
-    generate_reach (&mut info, state, unit);
+  let mut target_frontier:SmallVec <[[i32;2];32]> = SmallVec::new();
+  for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
+    let location = state.get (x,y);
+    if let Some(unit) = location.unit.as_ref() {
+      if unit.canrecruit && state.is_enemy (unit.side, state.current_side) {
+        info.locations [index (state, x,y)].distance_to_target = 0;
+        target_frontier.push ([unit.x, unit.y]);
+      }
+    }
+    if state.map.config.terrain_info [location.terrain].village && location.village_owner.map_or (true, | owner | state.is_enemy (owner, state.current_side)) {
+      info.locations [index (state, x,y)].distance_to_target = 0;
+      target_frontier.push ([x,y]);
+    }
+  }}
+  
+  while !target_frontier.is_empty() {
+    let mut next_frontier:SmallVec <[[i32;2];32]> = SmallVec::new();
+    for location in target_frontier.iter() {
+      let distance = info.locations [index (state, location [0], location [1])].distance_to_target;
+      for adjacent in fake_wesnoth::adjacent_locations (& state.map, *location) {
+        let other_distance = &mut info.locations [index (state, adjacent [0], adjacent [1])].distance_to_target;
+        if *other_distance >distance + 1 {
+          *other_distance = distance + 1;
+          next_frontier.push (adjacent) ;
+        }
+      }
+      //printlnerr!("{:?}", (location, distance));
+    }
+    
+    target_frontier = next_frontier;
   }
+  
+  for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
+    let location = state.get (x,y);
+    if let Some(unit) = location.unit.as_ref() {
+      if unit.side == state.current_side && (unit.moves > 0 || unit.attacks_left > 0) {
+        generate_reach (&mut info, state, unit);
+      }
+    }
+  }}
   
   fn update_info_after_move (info: &mut Info, state: & State, action: &Action) {
     
@@ -363,6 +429,11 @@ pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bo
           if unit.side == state.current_side && unit.moves > 0 {
             temporarily_invalid_choices.push (candidate);
           }
+          continue;
+        }
+      }
+      if let fake_wesnoth::Move::Recruit {unit_type, ..} = candidate.0.action {
+        if state.sides [state.current_side].gold < state.map.config.unit_type_examples [unit_type].unit_type.cost {
           continue;
         }
       }
