@@ -188,4 +188,195 @@ impl Player {
     }).collect()
   }
 
+use std::collections::BinaryHeap;
+use std::rc::Rc;
+use std::cell::Cell;
+use std::cmp::Ordering;
+use smallvec::SmallVec;
 
+pub fn play_turn_fast (state: &mut State, allow_combat: bool, stop_at_combat: bool)->Vec<Move> {
+  #[derive (Clone)]
+  struct Action {
+    evaluation: f64,
+    action: Move,
+    source: [i32; 2],
+    destination: Option<[i32; 2]>,
+    valid: Cell<bool>,
+  }
+  struct ActionReference (Rc<Action>);
+  #[derive (Clone, Default)]
+  struct LocationInfo {
+    choices: Vec<Rc<Action>>,
+    moves_attacking: Vec<Rc<Action>>,
+    last_update: usize,
+  }
+  struct Info {
+    locations: Vec<LocationInfo>,
+    actions: BinaryHeap <ActionReference>,
+    last_update: usize,
+    allow_combat: bool,
+  }
+  
+  impl Ord for ActionReference {
+    fn cmp(&self, other: &Self) -> Ordering {
+      self.0.evaluation.partial_cmp (&other.0.evaluation).unwrap()
+    }
+  }
+  impl PartialEq for ActionReference {
+    fn eq(&self, other: &Self) -> bool {
+      self.0.evaluation == other.0.evaluation
+    }
+  }
+  impl Eq for ActionReference {}
+  impl PartialOrd for ActionReference {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+      Some(self.cmp(other))
+    }
+  }
+  
+  fn index (state: & State, x: i32,y: i32)->usize {((x-1)+(y-1)*state.map.width) as usize}
+  let mut info = Info {
+    locations: vec![Default::default(); state.locations.len()],
+    actions: BinaryHeap::new(),
+    last_update: usize::default(),
+    allow_combat
+  };
+  
+  fn generate_action (info: &mut Info, state: & State, unit: & Unit, action: Move) {
+    let evaluation = evaluate_move (state, & action, false);
+    if evaluation < 0.0 {return}
+    let result = Rc::new (Action {
+      evaluation, action: action.clone(), valid: Cell::new (true), source: [unit.x, unit.y],
+      destination: match action {
+        fake_wesnoth::Move::Move {dst_x, dst_y, ..}
+        | fake_wesnoth::Move::Attack {dst_x, dst_y, ..}
+        | fake_wesnoth::Move::Recruit {dst_x, dst_y, ..} => Some([dst_x, dst_y]),
+        _=>None,
+      }
+    });
+    info.actions.push (ActionReference (result.clone())) ;
+    match action {
+      fake_wesnoth::Move::Attack {attack_x, attack_y, ..} => {
+        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (result.clone());
+      },
+      _=>()
+    }
+    info.locations [index (state, unit.x, unit.y)].choices.push (result);
+  }
+  fn reevaluate_action (info: &mut Info, state: & State, action: & Action) {
+    let mut new_action = (*action).clone();
+    action.valid.set (false);
+    new_action.evaluation = evaluate_move (state, & action.action, false);
+    let new_action = Rc::new(new_action);
+    info.actions.push (ActionReference (new_action.clone())) ;
+    info.locations [index (state, action.source[0], action.source[1])].choices.push (new_action);
+  }
+  fn generate_reach (info: &mut Info, state: & State, unit: & Unit) {
+    let reach = fake_wesnoth::find_reach (state, unit);
+    for &(location, moves_left) in reach.list.iter() {
+      if state.geta (location).unit.as_ref().map_or (false, | unit | unit.side != state.current_side || unit.moves == 0) {continue}
+      
+      generate_action (info, state, unit, fake_wesnoth::Move::Move {
+        src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1], moves_left: 0
+      });
+      if info.allow_combat && unit.attacks_left >0 {
+        for adjacent in fake_wesnoth::adjacent_locations (& state.map, location) {
+          if let Some(neighbor) = state.geta (adjacent).unit.as_ref() {
+            if state.is_enemy (unit.side, neighbor.side) {
+              for index in 0..unit.unit_type.attacks.len() {
+                generate_action (info, state, unit, fake_wesnoth::Move::Attack {
+                  src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1],
+                  attack_x: adjacent [0], attack_y: adjacent [1], weapon: index
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    if info.allow_combat && unit.canrecruit {
+      for location in recruit_hexes (state, [unit.x, unit.y]) {
+        for & recruit in state.sides [unit.side].recruits.iter() {
+          generate_action (info, state, unit, fake_wesnoth::Move::Recruit{
+            dst_x: location [0], dst_y: location [1], unit_type: recruit
+          });
+        }
+      }
+    }
+  }
+  
+  for unit in state.locations.iter().filter_map (| location | location.unit.as_ref()) {
+    generate_reach (&mut info, state, unit);
+  }
+  
+  fn update_info_after_move (info: &mut Info, state: & State, action: &Action) {
+    
+    match action.action {
+      fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
+        for other_action in info.locations [index (state, action.source [0], action.source [1])].choices.drain(..) {
+          other_action.valid.set (false);
+        }
+      },
+      fake_wesnoth::Move::Attack {src_x, src_y, dst_x, dst_y, attack_x, attack_y, weapon} => {
+        for other_action in info.locations [index (state, action.source [0], action.source [1])].choices.drain(..) {
+          other_action.valid.set (false);
+        }
+        if state.get (attack_x, attack_y).unit.is_none() {
+          let modified: Vec<_> = info.locations [index(state, attack_x, attack_y)].moves_attacking.drain(..).filter (|m|m.valid.get()).map (| m| m.source).collect();
+          info.last_update += 1;
+          for source in modified {
+            let index = index(state, source[0], source[1]);
+            if info.locations [index].last_update < info.last_update {
+              info.locations [index].last_update = info.last_update;
+              generate_reach (info, state, state.geta (source).unit.as_ref().unwrap());
+            }
+          }
+        }
+        else {
+          for action in ::std::mem::replace(&mut info.locations [index(state, attack_x, attack_y)].moves_attacking, Vec::new()) {
+            reevaluate_action (info, state, &action);
+          }
+        }
+      },
+      fake_wesnoth::Move::Recruit {dst_x, dst_y, ref unit_type} => {
+
+      },
+      fake_wesnoth::Move::EndTurn => {},
+    }
+  }
+  
+  let mut result = Vec::new() ;
+  loop {
+    let choice;
+    let mut temporarily_invalid_choices: SmallVec<[ActionReference; 8]> = SmallVec::new() ;
+    loop {
+      let candidate = match info.actions.pop() {
+        Some(a)=>a,
+        _=>{
+          result.push (fake_wesnoth::Move::EndTurn);
+          return result
+        },
+      };
+      if !candidate.0.valid.get() {continue}
+      if let Some(destination) = candidate.0.destination {
+        if let Some(unit) = state.geta (destination).unit.as_ref() {
+          if unit.side == state.current_side && unit.moves > 0 {
+            temporarily_invalid_choices.push (candidate);
+          }
+          continue;
+        }
+      }
+      choice = candidate.0;
+      break
+    }
+    
+    result.push (choice.action.clone() );
+    if stop_at_combat && match choice.action {fake_wesnoth::Move::Attack {..} => true, _=>false} {
+      return result
+    }
+    
+    info.actions.extend (temporarily_invalid_choices);
+    fake_wesnoth::apply_move (state, &mut Vec::new(), & choice.action) ;
+    update_info_after_move (&mut info, &*state, & choice) ;
+  }
+}

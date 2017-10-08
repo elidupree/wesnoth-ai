@@ -112,7 +112,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut current_state: Option <Arc<fake_wesnoth::State>> = None;
   let mut redraw = true;
   let (ai_sender, ai_receiver) = channel();
-  let (tree_sender, tree_receiver) = channel();
+  let (tree_sender, tree_receiver) = channel::<monte_carlo_ai::GenericNode>();
   let mut proceeding = false;//true;
   let mut replacing_tree = true;
   
@@ -139,9 +139,16 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         let _ = sender.send (choice);
         let _ = tree_sender.send (player.last_root.unwrap());
         */
+        
+        /*
         let (root, moves) = monte_carlo_ai::choose_moves (& state);
         let _ = sender.send (moves);
         let _ = tree_sender.send (root);
+        */
+        
+        let mut mutstate = (*state).clone();
+        let moves = naive_ai::play_turn_fast (&mut mutstate, true, true);
+        let _ = sender.send (moves);
       });
       
       //hack 
