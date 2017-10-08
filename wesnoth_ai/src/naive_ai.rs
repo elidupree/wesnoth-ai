@@ -93,8 +93,8 @@ impl Player {
       result += healing as f64 - 0.8;
     }
     if unit.canrecruit {
-      result -= defense / 2.0;
-      if !terrain_info.keep {result -= 5.0;}
+      //result -= defense / 2.0;
+      if !terrain_info.keep {result -= 6.0;}
     }
     result
   }
