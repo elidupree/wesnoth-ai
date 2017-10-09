@@ -667,32 +667,36 @@ pub fn find_reach (state: & State, unit: & Unit)->Reach {
   frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
-      if moves_left > 0 { for adjacent in adjacent_locations (& state.map, location) {
-        let stuff = state.geta (adjacent);
-        let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
+      let stuff = state.geta (location);
+      let adjacents = adjacent_locations (& state.map, location);
+      let mut moves_left_including_zoc = moves_left;
+      if moves_left_including_zoc > 0 && !unit.unit_type.skirmisher {for &adjacent in adjacents.iter() {
+        if state.geta (adjacent).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
+          moves_left_including_zoc = 0;
+          break;
+        }
+      }}
+      if moves_left_including_zoc > 0 { for adjacent in adjacents {
+        let adjacent_stuff = state.geta (adjacent);
+        let mut remaining = moves_left - unit.unit_type.movement_costs.get (adjacent_stuff.terrain).unwrap();
         if remaining < 0 { continue; }
         let discovered_index = result.index(adjacent);
         if result.map [discovered_index] != i32::max_value() { continue; }
-        if stuff.unit.as_ref().map_or (false, | neighbor | state.is_enemy (unit.side, neighbor.side)) { continue; }
+        if adjacent_stuff.unit.as_ref().map_or (false, | neighbor | state.is_enemy (unit.side, neighbor.side)) { continue; }
         
-        if remaining > 0 && !unit.unit_type.skirmisher {
-          for double_adjacent in adjacent_locations (& state.map, adjacent) {
-            if state.get (double_adjacent [0], double_adjacent [1]).unit.as_ref().map_or (false, | neighbor | neighbor.unit_type.zone_of_control && state.is_enemy (unit.side, neighbor.side)) {
-              remaining = 0;
-              break;
-            }
-          }
-        }
         result.map [discovered_index] = i32::max_value()-1;
         frontiers [remaining as usize].push (adjacent);
       }}
-      let stuff = state.get (location [0], location [1]);
-      let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
-      let capture = info.village && stuff.village_owner != Some(unit.side);
-      let final_moves_left = if capture {0} else {moves_left};
+      
+      let mut moves_left_including_village_capture = moves_left_including_zoc;
+      if moves_left_including_village_capture > 0 {
+        let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
+        let capture = info.village && stuff.village_owner != Some(unit.side);
+        if capture {moves_left_including_village_capture = 0;}
+      }
       let index = result.index(location);
-      result.map [index] = final_moves_left;
-      result.list.push ((location, final_moves_left));
+      result.map [index] = moves_left_including_village_capture;
+      result.list.push ((location, moves_left_including_village_capture));
     }
   }
   result
