@@ -11,6 +11,7 @@ extern crate glium;
 extern crate conrod;
 extern crate smallvec;
 extern crate arrayvec;
+extern crate slicevec;
 
 
 macro_rules! printerr(

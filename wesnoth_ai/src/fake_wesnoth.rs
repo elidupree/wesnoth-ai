@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::cmp::{min, max};
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
+use slicevec::SliceVec;
 use rand::{self, Rng};
 
 
@@ -648,13 +649,17 @@ impl Reach {
     Some (result)
   }
 }
-
+yu
 pub fn find_reach (state: & State, unit: & Unit)->Reach {
-  let mut frontiers = Vec::with_capacity (unit.moves as usize + 1);
+  let mut frontier_storage = vec![[0,0]; (unit.moves*(unit.moves+1)*3)as usize + 1];
+  let mut frontiers: SmallVec<[SliceVec<[i32;2]>; 12]> = SmallVec::with_capacity (unit.moves as usize + 1);
+  let mut frontier_storage = &mut*frontier_storage;
   for moves_taken in (1..(unit.moves as usize+1)).rev() {
-    frontiers.push (Vec::with_capacity (moves_taken*6));
+    let (this_frontier_storage, remaining_frontier_storage) = ::std::mem::replace(&mut frontier_storage, &mut [] as &mut [_]).split_at_mut(moves_taken * 6);
+    frontier_storage = remaining_frontier_storage;
+    frontiers.push (SliceVec::new(this_frontier_storage));
   }
-  frontiers.push (Vec::with_capacity (1));
+  frontiers.push (SliceVec::new(frontier_storage));
   
   let diameter = (unit.moves*2+1) as usize;
   let mut result = Reach {
@@ -666,7 +671,8 @@ pub fn find_reach (state: & State, unit: & Unit)->Reach {
   };
   frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
-    for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
+    assert_eq!(moves_left as usize+1, frontiers.len());
+    for &location in frontiers.pop().unwrap().iter() {
       let stuff = state.geta (location);
       let adjacents = adjacent_locations (& state.map, location);
       let mut moves_left_including_zoc = moves_left;
