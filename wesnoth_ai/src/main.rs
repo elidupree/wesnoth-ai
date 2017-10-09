@@ -12,6 +12,7 @@ extern crate conrod;
 extern crate smallvec;
 extern crate arrayvec;
 extern crate slicevec;
+extern crate typed_arena;
 
 
 macro_rules! printerr(

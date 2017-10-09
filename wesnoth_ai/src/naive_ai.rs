@@ -205,6 +205,7 @@ use std::rc::Rc;
 use std::cell::Cell;
 use std::cmp::Ordering;
 use smallvec::SmallVec;
+use typed_arena::Arena;
 
 pub struct PlayTurnFastParameters {
   pub allow_combat: bool,
@@ -232,39 +233,41 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     destination: Option<[i32; 2]>,
     valid: Cell<bool>,
   }
-  struct ActionReference (Rc<Action>);
-  struct LocationInfo {
-    choices: Vec<Rc<Action>>,
-    moves_attacking: Vec<Rc<Action>>,
+  struct ActionReference<'a> (&'a Action);
+  struct LocationInfo<'a> {
+    choices: Vec<&'a Action>,
+    moves_attacking: Vec<&'a Action>,
     last_update: usize,
     distance_to_target: i32,
   }
-  struct Info {
-    locations: Vec<LocationInfo>,
-    actions: BinaryHeap <ActionReference>,
+  struct Info<'a> {
+    locations: Vec<LocationInfo<'a>>,
+    actions: BinaryHeap <ActionReference<'a>>,
     last_update: usize,
     parameters: PlayTurnFastParameters,
   }
   
-  impl Ord for ActionReference {
+  impl<'a> Ord for ActionReference<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
       self.0.evaluation.partial_cmp (&other.0.evaluation).unwrap()
     }
   }
-  impl PartialEq for ActionReference {
+  impl<'a> PartialEq for ActionReference<'a> {
     fn eq(&self, other: &Self) -> bool {
       self.0.evaluation == other.0.evaluation
     }
   }
-  impl Eq for ActionReference {}
-  impl PartialOrd for ActionReference {
+  impl<'a> Eq for ActionReference<'a> {}
+  impl<'a> PartialOrd for ActionReference<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
       Some(self.cmp(other))
     }
   }
-  
+  ,l
   #[inline]
   fn index (state: & State, x: i32,y: i32)->usize {((x-1)+(y-1)*state.map.width) as usize}
+  
+  let action_arena = Arena::with_capacity(1000);
   let mut info = Info {
     locations: (0..state.locations.len()).map(|_| LocationInfo {
       choices: Vec::new(),
@@ -296,10 +299,10 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     }
     evaluation
   }
-  fn generate_action (info: &mut Info, state: & State, unit: & Unit, action: Move) {
+  fn generate_action<'a, 'b, 'c: 'a+'b> (info: &'a mut Info<'b>, action_arena: &'c Arena<Action>, state: & State, unit: & Unit, action: Move) {
     let evaluation = evaluate (info, state, & action);
     if evaluation < 0.0 {return}
-    let result = Rc::new (Action {
+    let result = action_arena.alloc (Action {
       evaluation, action: action.clone(), valid: Cell::new (true), source: [unit.x, unit.y],
       destination: match action {
         fake_wesnoth::Move::Move {dst_x, dst_y, ..}
@@ -308,37 +311,37 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
         _=>None,
       }
     });
-    info.actions.push (ActionReference (result.clone())) ;
+    info.actions.push (ActionReference (result)) ;
     match action {
       fake_wesnoth::Move::Attack {attack_x, attack_y, ..} => {
-        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (result.clone());
+        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (result);
       },
       _=>()
     }
     info.locations [index (state, unit.x, unit.y)].choices.push (result);
   }
-  fn reevaluate_action (info: &mut Info, state: & State, action: & Action) {
+  fn reevaluate_action<'a, 'b, 'c: 'a+'b> (info: &'a mut Info<'b>, action_arena: &'c Arena<Action>, state: & State, action: & Action) {
     if !action.valid.get() { return }
     let mut new_action = (*action).clone();
     action.valid.set (false);
     new_action.evaluation = evaluate (info, state, & action.action);
-    let new_action = Rc::new(new_action);
-    info.actions.push (ActionReference (new_action.clone())) ;
+    let new_action = action_arena.alloc (new_action);
+    info.actions.push (ActionReference (new_action)) ;
     match action.action {
       fake_wesnoth::Move::Attack {attack_x, attack_y, ..} => {
-        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (new_action.clone());
+        info.locations [index (state, attack_x, attack_y)].moves_attacking.push (new_action);
       },
       _=>()
     }
     info.locations [index (state, action.source[0], action.source[1])].choices.push (new_action);
   }
-  fn generate_reach (info: &mut Info, state: & State, unit: & Unit) {
+  fn generate_reach<'a, 'b, 'c: 'a+'b> (info: &'a mut Info<'b>, action_arena: &'c Arena<Action>, state: & State, unit: & Unit) {
     let reach = fake_wesnoth::find_reach (state, unit);
     for &(location, moves_left) in reach.list.iter() {
       if state.geta (location).unit.as_ref().map_or (false, | unit | unit.side != state.current_side || unit.moves == 0) {continue}
       
       if location != [unit.x, unit.y] {
-        generate_action (info, state, unit, fake_wesnoth::Move::Move {
+        generate_action (info, action_arena, state, unit, fake_wesnoth::Move::Move {
           src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1], moves_left: 0
         });
       }
@@ -347,7 +350,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
           if let Some(neighbor) = state.geta (adjacent).unit.as_ref() {
             if state.is_enemy (unit.side, neighbor.side) {
               for index in 0..unit.unit_type.attacks.len() {
-                generate_action (info, state, unit, fake_wesnoth::Move::Attack {
+                generate_action (info, action_arena, state, unit, fake_wesnoth::Move::Attack {
                   src_x: unit.x, src_y: unit.y, dst_x: location [0], dst_y: location [1],
                   attack_x: adjacent [0], attack_y: adjacent [1], weapon: index
                 });
@@ -361,7 +364,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
       for location in recruit_hexes (state, [unit.x, unit.y]) {
         for & recruit in state.sides [unit.side].recruits.iter() {
           if state.sides [unit.side].gold >= state.map.config.unit_type_examples [recruit].unit_type.cost {
-            generate_action (info, state, unit, fake_wesnoth::Move::Recruit{
+            generate_action (info, action_arena, state, unit, fake_wesnoth::Move::Recruit{
               dst_x: location [0], dst_y: location [1], unit_type: recruit
             });
           }
@@ -369,7 +372,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
       }
     }
   }
-  hj
+  
   let mut target_frontier = Vec::with_capacity(32);
   let mut next_frontier = Vec::with_capacity(32);
   for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
@@ -407,12 +410,12 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     let location = state.get (x,y);
     if let Some(unit) = location.unit.as_ref() {
       if unit.side == state.current_side && (unit.moves > 0 || unit.attacks_left > 0) {
-        generate_reach (&mut info, state, unit);
+        generate_reach (&mut info, &action_arena, state, unit);
       }
     }
   }}
   
-  fn update_info_after_move (info: &mut Info, state: & State, action: &Action) {
+  fn update_info_after_move<'a, 'b, 'c: 'a+'b> (info: &'a mut Info<'b>, action_arena: &'c Arena<Action>, state: & State, action: &Action) {
     
     match action.action {
       fake_wesnoth::Move::Move {src_x, src_y, dst_x, dst_y, moves_left} => {
@@ -435,7 +438,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
               for other_action in info.locations [index].choices.drain(..) {
                 other_action.valid.set (false);
               }
-              generate_reach (info, state, state.geta (source).unit.as_ref().unwrap());
+              generate_reach (info, action_arena, state, state.geta (source).unit.as_ref().unwrap());
             }
           }
         }
@@ -446,7 +449,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
         }
         else {
           for other_action in ::std::mem::replace(&mut info.locations [index(state, attack_x, attack_y)].moves_attacking, Vec::new()) {
-            reevaluate_action (info, state, &other_action);
+            reevaluate_action (info, action_arena, state, &other_action);
           }
         }
       },
@@ -498,6 +501,6 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     if state.scores.is_some() {
       return result
     }
-    update_info_after_move (&mut info, &*state, & choice) ;
+    update_info_after_move (&mut info, &action_arena, &*state, & choice) ;
   }
 }
