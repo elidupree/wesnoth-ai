@@ -263,7 +263,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
       Some(self.cmp(other))
     }
   }
-  ,l
+  
   #[inline]
   fn index (state: & State, x: i32,y: i32)->usize {((x-1)+(y-1)*state.map.width) as usize}
   
