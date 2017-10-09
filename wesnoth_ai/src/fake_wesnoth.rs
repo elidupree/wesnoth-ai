@@ -579,21 +579,42 @@ pub fn guess_combat (state: & State, attacker: & Unit, defender: & Unit, attacke
 }
 
 pub fn adjacent_locations (map: & Map, coordinates: [i32; 2])->ArrayVec<[[i32; 2]; 6]> {
+  if coordinates [0] > 1 && coordinates [1] > 1 && coordinates [0] < map.width && coordinates [1] < map.height {
+    return adjacent_locations_unchecked (map, coordinates);
+  }
   let mut result = ArrayVec::new();
-  {
-  let mut consider = | [x,y]:[i32;2] | {
-    if x >= 1 && y >= 1 && x <= map.width && y <= map.height {
-      result.push ([x,y]);
-    }
-  };
-  consider ([coordinates [0], coordinates [1] + 1]);
-  consider ([coordinates [0], coordinates [1] - 1]);
-  consider ([coordinates [0]-1, coordinates [1] - (coordinates [0]&1)]);
-  consider ([coordinates [0]-1, coordinates [1] + 1 - (coordinates [0]&1)]);
-  consider ([coordinates [0]+1, coordinates [1] - (coordinates [0]&1)]);
-  consider ([coordinates [0]+1, coordinates [1] + 1 - (coordinates [0]&1)]);
+  let offset = (coordinates [0]&1);
+  if coordinates [1] < map.height {
+    result.push ([coordinates [0], coordinates [1] + 1]);
+  }
+  if coordinates [1] > 1 {
+    result.push ([coordinates [0], coordinates [1] - 1]);
+  }
+  if coordinates [0] > 1 {
+    let x = coordinates [0]-1;
+    let y = coordinates [1] - offset;
+    if y >= 1 { result.push ([x, y]); }
+    if y < map.height { result.push ([x, y+1]); }
+  }
+  if coordinates [0] < map.width {
+    let x = coordinates [0]+1;
+    let y = coordinates [1] - offset;
+    if y >= 1 { result.push ([x,y]); }
+    if y < map.height { result.push ([x,y+1]); }
   }
   result
+}
+
+pub fn adjacent_locations_unchecked (map: & Map, coordinates: [i32; 2])->ArrayVec<[[i32; 2]; 6]> {
+  let offset = (coordinates [0]&1);
+  ArrayVec::from([
+    [coordinates [0], coordinates [1] + 1],
+    [coordinates [0], coordinates [1] - 1],
+    [coordinates [0]-1, coordinates [1] - offset],
+    [coordinates [0]-1, coordinates [1] + 1 - offset],
+    [coordinates [0]+1, coordinates [1] - offset],
+    [coordinates [0]+1, coordinates [1] + 1 - offset],
+  ])
 }
 
 pub fn distance_between (first: [i32; 2], second: [i32; 2])->i32 {
