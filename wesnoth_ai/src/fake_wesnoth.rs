@@ -126,11 +126,17 @@ pub struct State {
   pub scores: Option <Vec<f64>>,
 }
 impl State {
+  #[inline]
   pub fn get (&self, x: i32,y: i32)->&Location {& self.locations [((x-1)+(y-1)*self.map.width) as usize]}
+  #[inline]
   pub fn get_mut (&mut self, x: i32,y: i32)->&mut Location {&mut self.locations [((x-1)+(y-1)*self.map.width) as usize]}
+  #[inline]
   pub fn geta (&self, coordinates: [i32; 2])->&Location {self.get(coordinates[0], coordinates[1])}
+  #[inline]
   pub fn geta_mut (&mut self, coordinates: [i32; 2])->&mut Location {self.get_mut(coordinates[0], coordinates[1])}
+  #[inline]
   pub fn get_terrain_info (&self, x: i32,y: i32)->&TerrainInfo {self.map.config.terrain_info.get (self.get(x,y).terrain).unwrap()}
+  #[inline]
   pub fn is_enemy (&self, side: usize, other: usize)->bool {self.sides [side].enemies[other]}
 }
 
@@ -635,6 +641,7 @@ pub struct Reach {
   pub list: Vec<([i32; 2], i32)>,
 }
 impl Reach {
+  #[inline]
   fn index (&self, location: [i32;2])->usize {
     (self.radius + location[0] - self.center [0]) as usize * self.diameter + (self.radius + location[1] - self.center [1]) as usize
   }
