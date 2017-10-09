@@ -1,4 +1,5 @@
 use rand::{random};
+use std::mem;
 
 use fake_wesnoth;
 use rust_lua_shared::*;
@@ -244,7 +245,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     last_update: usize,
     parameters: PlayTurnFastParameters,
   }
-  hj
+  
   impl Ord for ActionReference {
     fn cmp(&self, other: &Self) -> Ordering {
       self.0.evaluation.partial_cmp (&other.0.evaluation).unwrap()
@@ -368,8 +369,9 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
       }
     }
   }
-  
-  let mut target_frontier:SmallVec <[[i32;2];32]> = SmallVec::new();
+  hj
+  let mut target_frontier = Vec::with_capacity(32);
+  let mut next_frontier = Vec::with_capacity(32);
   for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
     let location = state.get (x,y);
     if let Some(unit) = location.unit.as_ref() {
@@ -385,7 +387,6 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
   }}
   
   while !target_frontier.is_empty() {
-    let mut next_frontier:SmallVec <[[i32;2];32]> = SmallVec::new();
     for location in target_frontier.iter() {
       let distance = info.locations [index (state, location [0], location [1])].distance_to_target;
       for adjacent in fake_wesnoth::adjacent_locations (& state.map, *location) {
@@ -398,7 +399,8 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
       //printlnerr!("{:?}", (location, distance));
     }
     
-    target_frontier = next_frontier;
+    mem::swap(&mut target_frontier, &mut next_frontier);
+    next_frontier.clear();
   }
   
   for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
