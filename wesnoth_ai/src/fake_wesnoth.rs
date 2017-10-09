@@ -667,8 +667,8 @@ pub fn find_reach (state: & State, unit: & Unit)->Reach {
   frontiers [unit.moves as usize].push ([unit.x, unit.y]);
   for moves_left in (0..(unit.moves + 1)).rev() {
     for location in ::std::mem::replace (&mut frontiers [moves_left as usize], Vec::new()) {
-      for adjacent in adjacent_locations (& state.map, location) {
-        let stuff = state.get (adjacent [0], adjacent [1]);
+      if moves_left > 0 { for adjacent in adjacent_locations (& state.map, location) {
+        let stuff = state.geta (adjacent);
         let mut remaining = moves_left - unit.unit_type.movement_costs.get (stuff.terrain).unwrap();
         if remaining < 0 { continue; }
         let discovered_index = result.index(adjacent);
@@ -683,9 +683,9 @@ pub fn find_reach (state: & State, unit: & Unit)->Reach {
             }
           }
         }
-        result.map [discovered_index] = remaining;
+        result.map [discovered_index] = i32::max_value()-1;
         frontiers [remaining as usize].push (adjacent);
-      }
+      }}
       let stuff = state.get (location [0], location [1]);
       let info = state.map.config.terrain_info.get (stuff.terrain).unwrap();
       let capture = info.village && stuff.village_owner != Some(unit.side);
