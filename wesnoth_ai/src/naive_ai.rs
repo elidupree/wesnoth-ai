@@ -232,7 +232,6 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     valid: Cell<bool>,
   }
   struct ActionReference (Rc<Action>);
-  #[derive (Clone)]
   struct LocationInfo {
     choices: Vec<Rc<Action>>,
     moves_attacking: Vec<Rc<Action>>,
@@ -245,7 +244,7 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     last_update: usize,
     parameters: PlayTurnFastParameters,
   }
-  
+  hj
   impl Ord for ActionReference {
     fn cmp(&self, other: &Self) -> Ordering {
       self.0.evaluation.partial_cmp (&other.0.evaluation).unwrap()
@@ -263,14 +262,15 @@ pub fn play_turn_fast (state: &mut State, parameters: PlayTurnFastParameters)->V
     }
   }
   
+  #[inline]
   fn index (state: & State, x: i32,y: i32)->usize {((x-1)+(y-1)*state.map.width) as usize}
   let mut info = Info {
-    locations: vec![LocationInfo {
+    locations: (0..state.locations.len()).map(|_| LocationInfo {
       choices: Vec::new(),
       moves_attacking: Vec::new(),
       last_update: 0,
       distance_to_target: i32::max_value(),
-    }; state.locations.len()],
+    }).collect(),
     actions: BinaryHeap::new(),
     last_update: 0,
     parameters

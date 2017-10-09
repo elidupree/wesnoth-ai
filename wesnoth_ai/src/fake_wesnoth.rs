@@ -656,7 +656,7 @@ impl Reach {
     Some (result)
   }
 }
-yu
+
 pub fn find_reach (state: & State, unit: & Unit)->Reach {
   let mut frontier_storage = vec![[0,0]; (unit.moves*(unit.moves+1)*3)as usize + 1];
   let mut frontiers: SmallVec<[SliceVec<[i32;2]>; 12]> = SmallVec::with_capacity (unit.moves as usize + 1);
