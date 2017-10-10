@@ -140,7 +140,7 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
   match similar_moves {
     None => Vec::new(),
     Some(similar_moves) => {
-      let mut result = Vec::new();
+      let mut result = Vec::with_capacity(count);
       let mut earlier_iter = similar_moves.data.range ((Unbounded, Excluded(index.clone()))).rev();
       let mut later_iter = similar_moves.data.range ((Excluded(index.clone()), Unbounded));
       let mut earlier_value = earlier_iter.next();
