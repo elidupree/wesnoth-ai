@@ -36,7 +36,7 @@ pub trait GenericNodeType: Any + Send + Sync + Debug {
   
   fn focal_point (&self, node: &GenericNode) -> Option<[i32; 2]> {None}
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {false}
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {Vec::new()}
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {Vec::new()}
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {}
   fn make_choice_override (&self, node: &GenericNode) -> Option<(usize, Vec<GenericNode>)> {None}
 }
@@ -134,7 +134,7 @@ pub struct SimilarMoves {
   data: BTreeMap<SimilarMoveIndex, SimilarMoveData>,
 }
 
-fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: SimilarMoveIndex, count: usize)->Vec<SimilarMoveData> {
+fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: SimilarMoveIndex, count: usize)->Vec<(SimilarMoveIndex, SimilarMoveData)> {
   match similar_moves {
     None => Vec::new(),
     Some(similar_moves) => {
@@ -146,25 +146,25 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
       loop {
         match (earlier_value, later_value) {
           (None, None) => break,
-          (Some((_,earlier)), None) => {
-            result.push (earlier.clone());
+          (Some(earlier), None) => {
+            result.push ((earlier.0.clone(), earlier.1.clone()));
             let len = result.len();
-            result.extend (earlier_iter.map(|(k,v)| v.clone()).take(count - len));
+            result.extend (earlier_iter.map(|(k,v)| (k.clone(), v.clone())).take(count - len));
             break
           },
-          (None, Some((_,later))) => {
-            result.push (later.clone());
+          (None, Some(later)) => {
+            result.push ((later.0.clone(), later.1.clone()));
             let len = result.len();
-            result.extend (later_iter.map(|(k,v)| v.clone()).take(count - len));
+            result.extend (later_iter.map(|(k,v)| (k.clone(), v.clone())).take(count - len));
             break
           },
-          (Some((earlier_index, earlier)), Some((later_index, later))) => {
-            if index.reference_point.0 - earlier_index.reference_point.0 < later_index.reference_point.0 - index.reference_point.0 {
-              result.push (earlier.clone());
+          (Some(earlier), Some(later)) => {
+            if index.reference_point.0 - earlier.0.reference_point.0 < later.0.reference_point.0 - index.reference_point.0 {
+              result.push ((earlier.0.clone(), earlier.1.clone()));
               earlier_value = earlier_iter.next();
             }
             else {
-              result.push (later.clone());
+              result.push ((later.0.clone(), later.1.clone()));
               later_value = later_iter.next();
             }
           }
@@ -424,7 +424,7 @@ impl GenericNodeType for ExecuteAttack {
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     directory.attacks.get(& self.attack).is_some()
   }
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {
     get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index.clone(), 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
@@ -451,7 +451,7 @@ impl GenericNodeType for ExecuteRecruit {
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     directory.recruit_types.get(& self.recruit.unit_type).is_some() || directory.recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]).is_some()
   }
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {
     let mut result = Vec::new();
     result.extend(get_some_similar_moves (directory.recruit_types.get(& self.recruit.unit_type), node.state_globals.similarity_index.clone(), 15).into_iter());
     result.extend(get_some_similar_moves (directory.recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]), node.state_globals.similarity_index.clone(), 15).into_iter());
@@ -524,7 +524,7 @@ impl GenericNodeType for FinishTurnLazily {
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     directory.finish_turns.get(& (node.state.turn, node.state.current_side)).is_some()
   }
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {
     get_some_similar_moves (directory.finish_turns.get(& (node.state.turn, node.state.current_side)), node.state_globals.similarity_index.clone(), 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
@@ -623,7 +623,7 @@ impl GenericNodeType for ChooseHowToClearSpace {
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     (*self.follow_up)(self.finalize()).has_similarity_scores(node, directory)
   }
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {
     (*self.follow_up)(self.finalize()).get_some_similar_moves(node, directory)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
@@ -836,8 +836,12 @@ impl GenericNode {
                     let exact_weight = choice.visits as f64 * distance_weight(0.0);
                     let mut total_weight = exact_weight;
                     let mut total_score = exact_score;
-                    for similar in choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter() {
-                      let weight = distance_weight (similarity_distance(&similar.situation, &SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(&self)));
+                    for (similar_index, similar) in choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter() {
+                      let weight = distance_weight (
+                        (similar_index.reference_point.0 - choice.state_globals.similarity_index.reference_point.0).abs()
+                        //similarity_distance(&similar.situation, &SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(&self))
+                        
+                      );
                       total_score += similar.score * weight;
                       total_weight += weight;
                     };
