@@ -856,7 +856,7 @@ impl GenericNode {
                 }
                 else {
                   let c=2.0;
-                  let c_log_visits = c*((self.visits+1) as f64).ln();
+                  let c_log_visits = if self.visits < 4 {0.0} else {c*((self.visits+1) as f64).ln()};
                   self.choices.iter().enumerate().filter_map(|(index,choice)| {
                     let exact_score = choice.total_score;
                     let exact_weight = choice.visits as f64 * distance_weight(0.0);
