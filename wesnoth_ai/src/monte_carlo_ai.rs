@@ -410,7 +410,7 @@ impl GenericNodeType for ExecuteAttack {
                 unit_id, dst_x, dst_y, attack_x, attack_y, weapon,
               } = self.attack;
     if node.choices.is_empty() || node.visits > (1<<node.choices.len()) {
-      let mut new_child = node.new_child(ChooseAttack);
+      let mut new_child = node.new_child_unscored(ChooseAttack);
       new_child.do_moves_on_state(once (fake_wesnoth::Move::Attack {
         src_x: dst_x, src_y: dst_y, dst_x, dst_y, attack_x, attack_y, weapon,
       }));
@@ -436,7 +436,7 @@ impl GenericNodeType for ExecuteAttack {
 }
 impl GenericNodeType for ExecuteRecruit {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
-    let mut new_child = node.new_child (ChooseAttack);
+    let mut new_child = node.new_child_unscored(ChooseAttack);
     let Recruit{dst_x,dst_y,unit_type} = self.recruit.clone();
     new_child.do_moves_on_state(once (fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type}));
     (vec![new_child], None)
@@ -473,7 +473,7 @@ impl GenericNodeType for ExecuteRecruit {
 impl GenericNodeType for FinishTurnLazily {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
     let mut moves = Vec::new();
-    let mut new_child = node.new_child (ChooseAttack);
+    let mut new_child = node.new_child_unscored(ChooseAttack);
     
     let mut state_after = (*node.state).clone();
     /*let mut reaches = node.state_globals.reaches.clone();
@@ -627,7 +627,10 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
       starting_side: state.current_side,
       similar_moves: Default::default(),
     }),
-    state_globals: Arc::default(),
+    state_globals: Arc::new(StateGlobals {
+      reaches: Arc::new(generate_reaches(state)),
+      similarity_index: Default::default(),
+    }),
     visits: 0,
     total_score: 0.0,
     naive_score: 0.0,
@@ -661,8 +664,14 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
 
 impl GenericNode {
   fn new_child<T: GenericNodeType> (&self, node_type: T) -> GenericNode {
+    let mut result = self.new_child_unscored(node_type);
+    result.update_similarity_score();
+    result
+  }
+  fn new_child_unscored<T: GenericNodeType> (&self, node_type: T) -> GenericNode {
     self.new_child_dynamic(Box::new (node_type))
   }
+
   fn new_child_dynamic (&self, node_type: Box<GenericNodeType>) -> GenericNode {
     GenericNode {
       state: self.state.clone(), tree: self.tree.clone(), state_globals: self.state_globals.clone(),
