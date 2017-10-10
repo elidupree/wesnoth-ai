@@ -34,6 +34,7 @@ pub trait GenericNodeType: Any + Send + Sync + Debug {
 
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>);
   
+  fn focal_point (&self, node: &GenericNode) -> Option<[i32; 2]> {None}
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {false}
   fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {Vec::new()}
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {}
@@ -61,7 +62,7 @@ impl DisplayableNode for GenericNode {
 
 
 
-#[derive (Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive (Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub struct SimilarMoveIndex {
   reference_point: OrderedFloat <f64>,
   random_distinguisher: OrderedFloat <f64>
@@ -97,10 +98,10 @@ fn hex_weight_for_similarity (state: &State, focal_point: Option<[i32; 2]>, loca
   }
 }
 fn similar_move_index (data: & SimilarMoveSituation, focal_point: Option<[i32; 2]>)->SimilarMoveIndex {
-  let result = 0.0;
+  let mut result = 0.0;
   for y in 1..(data.state.map.height+1) { for x in 1..(data.state.map.width+1) {
     let weight = hex_weight_for_similarity (&data.state, focal_point, [x,y]);
-    weight * hex_similarity_score_1d (data, [x,y]);
+    result += weight * hex_similarity_score_1d (data, [x,y]);
   }}
   SimilarMoveIndex {
     reference_point: OrderedFloat(result),
@@ -108,7 +109,7 @@ fn similar_move_index (data: & SimilarMoveSituation, focal_point: Option<[i32; 2
   }
 }
 fn similarity_distance (first: & SimilarMoveSituation, second: & SimilarMoveSituation, focal_point: Option<[i32; 2]>)->f64 {
-  let result = 0.0;
+  let mut result = 0.0;
   for y in 1..(first.state.map.height+1) { for x in 1..(first.state.map.width+1) {
     let weight = hex_weight_for_similarity (&first.state, focal_point, [x,y]);
     result += weight * (hex_similarity_score_1d (first, [x,y]) - hex_similarity_score_1d (second, [x,y])).abs();
@@ -138,8 +139,8 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
     None => Vec::new(),
     Some(similar_moves) => {
       let mut result = Vec::new();
-      let mut earlier_iter = similar_moves.data.range ((Unbounded, Excluded(index))).rev();
-      let mut later_iter = similar_moves.data.range ((Excluded(index), Unbounded));
+      let mut earlier_iter = similar_moves.data.range ((Unbounded, Excluded(index.clone()))).rev();
+      let mut later_iter = similar_moves.data.range ((Excluded(index.clone()), Unbounded));
       let mut earlier_value = earlier_iter.next();
       let mut later_value = later_iter.next();
       loop {
@@ -147,12 +148,14 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
           (None, None) => break,
           (Some((_,earlier)), None) => {
             result.push (earlier.clone());
-            result.extend (earlier_iter.map(|(k,v)| v.clone()).take(count - result.len()));
+            let len = result.len();
+            result.extend (earlier_iter.map(|(k,v)| v.clone()).take(count - len));
             break
           },
           (None, Some((_,later))) => {
             result.push (later.clone());
-            result.extend (later_iter.map(|(k,v)| v.clone()).take(count - result.len()));
+            let len = result.len();
+            result.extend (later_iter.map(|(k,v)| v.clone()).take(count - len));
             break
           },
           (Some((earlier_index, earlier)), Some((later_index, later))) => {
@@ -191,19 +194,11 @@ pub struct TreeGlobals {
 }
 
 
-#[derive (Clone, Debug)]
+#[derive (Clone, Debug, Default)]
 pub struct StateGlobals {
   similarity_index: SimilarMoveIndex,
-  pub reaches: HashMap<[i32;2], fake_wesnoth::Reach>
+  pub reaches: Arc<HashMap<[i32;2], fake_wesnoth::Reach>>
 }
-impl StateGlobals {
-  pub fn new (state: & State)->StateGlobals {
-    StateGlobals {
-      reaches: generate_reaches(state)
-    }
-  }
-}
-
 
 
 
@@ -430,10 +425,10 @@ impl GenericNodeType for ExecuteAttack {
     directory.attacks.get(& self.attack).is_some()
   }
   fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
-    get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index, 30)
+    get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index.clone(), 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
-    directory.attacks.entry (self.attack.clone()).or_insert (Default::default()).data.insert(node.state_globals.similarity_index, SimilarMoveData {
+    directory.attacks.entry (self.attack.clone()).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
       score,
       situation: SimilarMoveSituation {state: node.state.clone()},
     });
@@ -632,7 +627,7 @@ pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
       starting_side: state.current_side,
       similar_moves: Default::default(),
     }),
-    state_globals: Arc::new(StateGlobals::new (state)),
+    state_globals: Arc::default(),
     visits: 0,
     total_score: 0.0,
     naive_score: 0.0,
@@ -680,17 +675,29 @@ impl GenericNode {
 
   fn set_state (&mut self, new_state: State) {
     self.state = Arc::new(new_state);
-    self.state_globals = Arc::new(StateGlobals::new (&self.state));
+    self.state_globals = Arc::new(StateGlobals {
+      reaches: Arc::new(generate_reaches(&self.state)),
+      similarity_index: similar_move_index(&SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(self))
+    });
   }
   fn do_moves_on_state <I: Iterator<Item=fake_wesnoth::Move>>(&mut self, actions: I) {
     let mut state_after = (*self.state).clone();
-    let mut reaches = (*self.state_globals).reaches.clone();
+    let mut reaches = (*self.state_globals.reaches).clone();
     for action in actions {
       fake_wesnoth::apply_move (&mut state_after, &mut Vec::new(), & action);
       update_reaches_after_move (&mut reaches, &state_after, & action);
     }
     self.state = Arc::new(state_after);
-    self.state_globals = Arc::new(StateGlobals {reaches});
+    self.state_globals = Arc::new(StateGlobals {
+      reaches: Arc::new(reaches),
+      similarity_index: similar_move_index(&SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(self))
+    });
+  }
+  fn update_similarity_score (&mut self) {
+    self.state_globals = Arc::new(StateGlobals {
+      reaches: self.state_globals.reaches.clone(),
+      similarity_index: similar_move_index(&SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(self))
+    });
   }
 
   
@@ -801,11 +808,11 @@ impl GenericNode {
                     let exact_weight = choice.visits as f64 * distance_weight(0.0);
                     let mut total_weight = exact_weight;
                     let mut total_score = exact_score;
-                    let similar_moves = choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter().map(|similar| {
-                      let weight = distance_weight (similarity_distance(similar, &self.state));
+                    for similar in choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter() {
+                      let weight = distance_weight (similarity_distance(&similar.situation, &SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(&self)));
                       total_score += similar.score * weight;
                       total_weight += weight;
-                    });
+                    };
                     
                     // in a previous version of this algorithm, I chose to limit the certainty granted by non-exact moves, so that it couldn't indefinitely postpone getting more exact scores. With the new system, we only examine a fixed maximum amount of similar moves anyway, so there's no theoretical need for an additional limit.
                     let uncertainty_bonus = (c_log_visits/total_weight).sqrt();
@@ -836,7 +843,7 @@ impl GenericNode {
     self.visits += 1;
     
     {
-      let guard = self.tree.similar_moves.lock().unwrap();
+      let mut guard = self.tree.similar_moves.lock().unwrap();
       let similar_moves = &mut*guard;
       self.node_type.add_similarity_score(self, similar_moves, scores[self.state.current_side]);
     }
