@@ -20,7 +20,7 @@ pub fn side_color (side: usize)->conrod::color::Color {
   }
 }
 
-pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State, offsets: [f64; 2]) {
+pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State, offsets: [f64; 2], lines: &[([i32;2],[i32;2])]) {
   let hex_size = 40f64;
   let meta_width = 40f64;
   let map_size = [hex_size*state.map.width as f64, hex_size*(state.map.height as f64 + 0.5)];
@@ -36,6 +36,13 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State,
         .font_size(14)
         .set(interface.widget_id_generator().next(), interface);
   }
+  
+  let hex_center = move |[x,y]:[i32;2]| {
+    [
+      offsets [0] + meta_width + hex_size*((x-1) as f64+0.5),
+      offsets [1]              - hex_size*((y-1) as f64+if (x & 1) == 0 {1.0} else {0.5}),
+    ]
+  };
   
   for x in 1..(state.map.width+1) {
     let vertical_offset = offsets [1] - if (x & 1) == 0 {hex_size} else {hex_size/2.0};
@@ -67,6 +74,11 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State,
       }
     }
   }
+  for &(start, end) in lines.iter() {
+    widget::Line::new(hex_center(start), hex_center(end))
+      .solid().thickness(hex_size/15.0)
+      .set(interface.widget_id_generator().next(), interface);
+  }
 }
 
 #[derive (Clone)]
@@ -74,6 +86,7 @@ struct DisplayedState {
   depth: usize,
   size: [f64; 2],
   state: Arc <fake_wesnoth::State>,
+  lines: Vec<([i32;2],[i32;2])>,
   text: String,
   detail_text: String,
 }
@@ -82,8 +95,8 @@ use conrod::{self, widget, Colorable, Positionable, Sizeable, Widget};
 use conrod::backend::glium::glium::{self, Surface};
 use monte_carlo_ai::DisplayableNode;
 pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
-  const WIDTH: u32 = 600;
-  const HEIGHT: u32 = 800;
+  const WIDTH: u32 = 1200;
+  const HEIGHT: u32 = 1000;
 
   let mut events_loop = glium::glutin::EventsLoop::new();
   let window = glium::glutin::WindowBuilder::new()
@@ -201,6 +214,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             depth: depth,
             size: size,
             state: node.state().unwrap_or(root.state().unwrap()),
+            lines: node.lines(),
             text: node.info_text(),
             detail_text: node.detail_text(),
           });
@@ -279,10 +293,10 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
     if redraw {
       let ui = &mut ui.set_widgets();
       if let Some(state) = current_state.as_ref() {
-        draw_state (ui, &state, [0.0,0.0]);
+        draw_state (ui, &state, [0.0,0.0], &[]);
       }
       if let Some(displayed_state) = states_display.get(which_displayed) {
-        draw_state (ui, &displayed_state.state, [0.0,200.0]);
+        draw_state (ui, &displayed_state.state, [0.0,200.0], &displayed_state.lines);
         widget::Text::new(&displayed_state.detail_text)
           .color(side_color (displayed_state.state.current_side))
           .font_size(18)

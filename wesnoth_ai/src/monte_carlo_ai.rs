@@ -31,6 +31,7 @@ pub struct GenericNode {
 
 pub trait GenericNodeType: Any + Send + Sync + Debug {
   fn export_moves (&self, node: &GenericNode) -> Vec<fake_wesnoth::Move> {Vec::new()}
+  fn display_lines(&self)->Vec<([i32;2],[i32;2])> {Vec::new()}
 
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>);
   
@@ -44,6 +45,7 @@ pub trait GenericNodeType: Any + Send + Sync + Debug {
 pub trait DisplayableNode {
   fn visits(&self)->i32;
   fn state (&self)->Option<Arc<State>>;
+  fn lines(&self)->Vec<([i32;2],[i32;2])>;
   fn info_text (&self)->String;
   fn detail_text (&self)->String {String::new()}
   fn descendants (&self)->Vec<&DisplayableNode>;
@@ -52,6 +54,7 @@ pub trait DisplayableNode {
 impl DisplayableNode for GenericNode {
   fn visits(&self)->i32 {self.visits}
   fn state (&self)->Option<Arc<State>> {Some(self.state.clone())}
+  fn lines(&self)->Vec<([i32;2],[i32;2])> {self.node_type.display_lines()}
   fn info_text (&self)->String {format!("{:.2}\n{}", self.total_score/self.visits as f64, self.visits)}
   fn detail_text (&self)->String {format!("{:?}", self.node_type)}
   fn descendants (&self)->Vec<&DisplayableNode> {
@@ -443,6 +446,15 @@ impl GenericNodeType for ExecuteAttack {
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
     add_similarity_score (directory.attacks.entry (self.attack.clone()).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
   }
+  
+  fn display_lines(&self)->Vec<([i32;2],[i32;2])> {
+    let mut result = vec![(
+      [self.attack.dst_x,self.attack.dst_y],
+      [self.attack.attack_x,self.attack.attack_y]
+    )];
+    result.extend(self.preparation.planned_moves.iter().cloned());
+    result
+  }
 }
 impl GenericNodeType for ExecuteRecruit {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
@@ -470,6 +482,12 @@ impl GenericNodeType for ExecuteRecruit {
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
     add_similarity_score (directory.recruit_types.entry (self.recruit.unit_type).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
     add_similarity_score (directory.recruit_locations.entry ([self.recruit.dst_x, self.recruit.dst_y]).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
+  }
+    
+  fn display_lines(&self)->Vec<([i32;2],[i32;2])> {
+    let mut result = vec![];
+    result.extend(self.preparation.planned_moves.iter().cloned());
+    result
   }
 }
 impl GenericNodeType for FinishTurnLazily {
@@ -631,6 +649,11 @@ impl GenericNodeType for ChooseHowToClearSpace {
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
     (*self.follow_up)(self.finalize()).add_similarity_score(node, directory, score)
+  }
+  
+  fn display_lines(&self)->Vec<([i32;2],[i32;2])> {
+    let mut result = (*self.follow_up)(self.finalize()).display_lines();
+    result
   }
 }
 
