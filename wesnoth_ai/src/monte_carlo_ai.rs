@@ -128,7 +128,7 @@ fn hex_similarity_score_1d (data: & SimilarMoveSituation, location: [i32;2])->f6
 }
 fn distance_weight (distance: f64) -> f64 {
   //printlnerr!("distance {:?} became {:?}", distance, 0.5f64.powf(distance.abs()*100.0));
-  0.5f64.powf(distance.abs()*100.0)
+  0.9f64.powi((distance.abs()*650.0) as i32)
 }
 
 #[derive (Clone, Debug, Default)]
