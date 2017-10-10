@@ -94,7 +94,7 @@ fn hex_weight_for_similarity (state: &State, focal_point: Option<[i32; 2]>, loca
       // then it converges to 1.645
       // also we need a special case for 0
       if distance == 0 {0.5}
-      else { (distance as f64).powi(3) / (2.0*6.0*1.645)}
+      else { (distance*distance*distance) as f64 / (2.0*6.0*1.645)}
     },
   }
 }
@@ -433,6 +433,7 @@ impl GenericNodeType for ExecuteAttack {
     }
   }
   
+  fn focal_point (&self, node: &GenericNode) -> Option<[i32; 2]> {Some([self.attack.attack_x, self.attack.attack_y])}
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     directory.attacks.get(& self.attack).is_some()
   }
@@ -619,7 +620,9 @@ impl GenericNodeType for ChooseHowToClearSpace {
     new_child.do_moves_on_state(wesnoth_moves.into_iter());
     result.push (new_child);
     (result, None)
-  }  
+  }
+  
+  fn focal_point (&self, node: &GenericNode) -> Option<[i32; 2]> {(*self.follow_up)(self.finalize()).focal_point(node)}
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
     (*self.follow_up)(self.finalize()).has_similarity_scores(node, directory)
   }
