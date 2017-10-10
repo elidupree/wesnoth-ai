@@ -33,7 +33,7 @@ pub trait GenericNodeType: Any + Send + Sync + Debug {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>);
   
   fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {false}
-  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {}
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {Vec::new()}
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {}
   fn make_choice_override (&self, node: &GenericNode) -> Option<(usize, Vec<GenericNode>)> {None}
 }
@@ -59,7 +59,7 @@ impl DisplayableNode for GenericNode {
 
 
 
-#[derive (PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive (Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimilarMoveIndex {
   reference_point: OrderedFloat <f64>,
   random_distinguisher: OrderedFloat <f64>
@@ -128,6 +128,46 @@ fn distance_weight (distance: f64) -> f64 {
 
 pub struct SimilarMoves {
   data: BTreeMap<SimilarMoveIndex, SimilarMoveData>,
+}
+
+fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: SimilarMoveIndex, count: usize) {
+  similar_moves.match {
+    None => Vec::new(),
+    Some(similar_moves) => {
+      let mut result = Vec::new();
+      let mut earlier_iter = similar_moves.range ((Unbounded, Excluded(index))).rev();
+      let mut later_iter = similar_moves.range ((Excluded(index), Unbounded));
+      let mut earlier_value = earlier_iter.next();
+      let mut later_value = later_iter.next();
+      loop {
+        match (earlier_value, later_value) {
+          (None, None) => break,
+          (Some(earlier), None) => {
+            result.push (earlier.clone());
+            result.extend (earlier_iter.cloned().take(count - result.len()));
+            break
+          },
+          (None, Some(later)) => {
+            result.push (later.clone());
+            result.extend (later_iter.cloned().take(count - result.len()));
+            break
+          },
+          (Some(earlier), Some(later)) => {
+            if index.reference_point - earlier_value.reference_point < later_value.reference_point - index.reference_point {
+              result.push (earlier.clone());
+              earlier_value = earlier_iter.next();
+            }
+            else {
+              result.push (later.clone());
+              later_value = later_iter.next();
+            }
+          }
+        }
+        if result.len() >= count { break }
+      }
+      result
+    }
+  }
 }
 
 #[derive (Serialize, Deserialize, Debug, Default)]
@@ -382,14 +422,18 @@ impl GenericNodeType for ExecuteAttack {
       Some((rand::thread_rng().gen_range(0, node.choices.len()), Vec::new()))
     }
   }
-  fn rave_score (&self, node: &GenericNode) -> RaveScore {
-    node.turn.rave_scores.lock().unwrap().attacks.get(& self.attack).cloned().unwrap_or_default()
+  
+  fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
+    directory.attacks.get(& self.attack).is_some()
   }
-  fn add_rave_score (&self, node: &GenericNode, score: f64) {
-    let mut guard = node.turn.rave_scores.lock().unwrap();
-    let rave_score = guard.attacks.entry (self.attack.clone()).or_insert (RaveScore::default());
-    rave_score.total_score += score;
-    rave_score.visits += 1;
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+    get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index, 30);
+  }
+  fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
+    directory.attacks.entry (self.attack.clone()).or_insert (Default::default()).data.insert(node.state_globals.similarity_index, SimilarMoveData {
+      score,
+      situation: SimilarMoveSituation {state: node.state.clone()},
+    });
   }
 }
 impl GenericNodeType for ExecuteRecruit {
@@ -668,7 +712,7 @@ impl GenericNode {
     /*else if self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn + 3 {
       ::naive_ai::evaluate_state(&self.state)
     }*/
-    else if self.visits == 0 && ((self.state.turn, self.state.current_side) >= (self.tree.starting_turn+1, self.tree.starting_side)) {
+    else if self.visits == 0 && ((self.state.turn, self.state.current_side) >= (self.tree.starting_turn+2, self.tree.starting_side)) {
       let mut playout_state = (*self.state).clone();
       while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 5 {
         let turn = playout_state.turn;
@@ -749,11 +793,11 @@ impl GenericNode {
                 else {
                   let c_log_visits = c*((visits+1) as f64).ln();
                   self.choices.iter().enumerate().filter_map(|(index,choice)| {
-                    let exact_score = choice.total_score/choice.visits as f64;
+                    let exact_score = choice.total_score;
                     let exact_weight = choice.visits * distance_weight(0.0);
                     let mut total_weight = exact_weight;
-                    let mut total_score = exact_score*exact_weight;
-                    let similar_moves = choice.node_type.iterate_some_similar_moves (choice, similar_moves, |similar| {
+                    let mut total_score = exact_score;
+                    let similar_moves = choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter().map(|similar| {
                       let weight = distance_weight (similarity_distance(similar, &self.state));
                       total_score += similar.score * weight;
                       total_weight += weight;
