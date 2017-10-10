@@ -70,7 +70,8 @@ pub struct SimilarMoveIndex {
 
 #[derive (Clone, Debug)]
 pub struct SimilarMoveData {
-  score: f64,
+  total_score: f64,
+  visits: f64,
   situation: SimilarMoveSituation,
 }
 
@@ -126,6 +127,7 @@ fn hex_similarity_score_1d (data: & SimilarMoveSituation, location: [i32;2])->f6
   }
 }
 fn distance_weight (distance: f64) -> f64 {
+  //printlnerr!("distance {:?} became {:?}", distance, 0.5f64.powf(distance.abs()*100.0));
   0.5f64.powf(distance.abs()*100.0)
 }
 
@@ -174,6 +176,16 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
       result
     }
   }
+}
+
+fn add_similarity_score (similar_moves: &mut SimilarMoves, index: SimilarMoveIndex, situation: SimilarMoveSituation, score: f64) {
+  let data = similar_moves.data.entry(index).or_insert(SimilarMoveData {
+    total_score:0.0,
+    visits:0.0,
+    situation,
+  });
+  data.total_score += score;
+  data.visits += 1.0;
 }
 
 #[derive (Clone, Debug, Default)]
@@ -428,10 +440,7 @@ impl GenericNodeType for ExecuteAttack {
     get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index.clone(), 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
-    directory.attacks.entry (self.attack.clone()).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
-      score,
-      situation: SimilarMoveSituation {state: node.state.clone()},
-    });
+    add_similarity_score (directory.attacks.entry (self.attack.clone()).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
   }
 }
 impl GenericNodeType for ExecuteRecruit {
@@ -458,14 +467,8 @@ impl GenericNodeType for ExecuteRecruit {
     result
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
-    directory.recruit_types.entry (self.recruit.unit_type).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
-      score,
-      situation: SimilarMoveSituation {state: node.state.clone()},
-    });
-    directory.recruit_locations.entry ([self.recruit.dst_x, self.recruit.dst_y]).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
-      score,
-      situation: SimilarMoveSituation {state: node.state.clone()},
-    });
+    add_similarity_score (directory.recruit_types.entry (self.recruit.unit_type).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
+    add_similarity_score (directory.recruit_locations.entry ([self.recruit.dst_x, self.recruit.dst_y]).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
   }
 }
 impl GenericNodeType for FinishTurnLazily {
@@ -528,10 +531,7 @@ impl GenericNodeType for FinishTurnLazily {
     get_some_similar_moves (directory.finish_turns.get(& (node.state.turn, node.state.current_side)), node.state_globals.similarity_index.clone(), 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
-    directory.finish_turns.entry ((node.state.turn, node.state.current_side)).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
-      score,
-      situation: SimilarMoveSituation {state: node.state.clone()},
-    });
+    add_similarity_score (directory.finish_turns.entry ((node.state.turn, node.state.current_side)).or_insert (Default::default()), node.state_globals.similarity_index.clone(), SimilarMoveSituation {state: node.state.clone()}, score);
   }
 }
 impl GenericNodeType for ChooseHowToClearSpace {
@@ -842,12 +842,14 @@ impl GenericNode {
                         //similarity_distance(&similar.situation, &SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(&self))
                         
                       );
-                      total_score += similar.score * weight;
-                      total_weight += weight;
+                      total_score += similar.total_score * weight;
+                      total_weight += similar.visits * weight;
                     };
                     
-                    // in a previous version of this algorithm, I chose to limit the certainty granted by non-exact moves, so that it couldn't indefinitely postpone getting more exact scores. With the new system, we only examine a fixed maximum amount of similar moves anyway, so there's no theoretical need for an additional limit.
-                    let uncertainty_bonus = (c_log_visits/total_weight).sqrt();
+                    // I choose to limit the certainty granted by non-exact moves, so that it can't indefinitely postpone getting more exact scores.
+                    let uncertainty_bonus = (c_log_visits/
+                      min(OrderedFloat(total_weight), OrderedFloat(exact_weight*2.0+10.0)).0
+                    ).sqrt();
                     let score = total_score / total_weight + uncertainty_bonus;
                   
                     Some((index, score))
