@@ -49,6 +49,7 @@ pub trait DisplayableNode {
   fn info_text (&self)->String;
   fn detail_text (&self)->String {String::new()}
   fn descendants (&self)->Vec<&DisplayableNode>;
+  fn get_some_similar_moves (&self) -> Vec<(SimilarMoveIndex, SimilarMoveData)>;
 }
 
 impl DisplayableNode for GenericNode {
@@ -60,6 +61,10 @@ impl DisplayableNode for GenericNode {
   fn descendants (&self)->Vec<&DisplayableNode> {
     self.choices.iter().map (| choice | choice as &DisplayableNode).collect()
   }
+  fn get_some_similar_moves (&self) -> Vec<(SimilarMoveIndex, SimilarMoveData)> {
+    let guard = self.tree.similar_moves.lock().unwrap();
+    self.node_type.get_some_similar_moves(self, &*guard)
+  }
 }
 
 
@@ -67,20 +72,20 @@ impl DisplayableNode for GenericNode {
 
 #[derive (Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub struct SimilarMoveIndex {
-  reference_point: OrderedFloat <f64>,
-  random_distinguisher: OrderedFloat <f64>
+  pub reference_point: OrderedFloat <f64>,
+  pub random_distinguisher: OrderedFloat <f64>
 }
 
 #[derive (Clone, Debug)]
 pub struct SimilarMoveData {
-  total_score: f64,
-  visits: f64,
-  situation: SimilarMoveSituation,
+  pub total_score: f64,
+  pub visits: f64,
+  pub situation: SimilarMoveSituation,
 }
 
 #[derive (Clone, Debug)]
 pub struct SimilarMoveSituation {
-  state: Arc <State>,
+  pub state: Arc <State>,
 }
 
 fn hex_weight_for_similarity (state: &State, focal_point: Option<[i32; 2]>, location: [i32; 2])->f64 {
@@ -769,14 +774,14 @@ impl GenericNode {
     
     */
   
-    //printlnerr!("{:?}", self.node_type);
+    printlnerr!("{:?}", self.node_type);
     let scores = if let Some(scores) = self.state.scores.clone() {
       scores
     }
     /*else if self.state.current_side == self.tree.starting_side && self.state.turn == self.tree.starting_turn + 3 {
       ::naive_ai::evaluate_state(&self.state)
     }*/
-    else if self.visits == 0 && ((self.state.turn, self.state.current_side) >= (self.tree.starting_turn+2, self.tree.starting_side)) {
+    else if /*self.visits == 0 &&*/ ((self.state.turn, self.state.current_side) >= (self.tree.starting_turn+2, self.tree.starting_side)) {
       let mut playout_state = (*self.state).clone();
       while playout_state.scores.is_none() && playout_state.turn < self.tree.starting_turn + 5 {
         let turn = playout_state.turn;
@@ -798,6 +803,7 @@ impl GenericNode {
     }
     else {
       if self.choices.is_empty() {
+        assert!(self.visits == 0);
         let (a,b) = self.node_type.initialize_choices (&self);
         self.choices = a;
         if let Some(b) = b {self.node_type = b;}
@@ -812,18 +818,21 @@ impl GenericNode {
           
           
           match self.choices.len() {
-            0 => return TurnedOutToBeImpossible,
+            0 => {
+              assert!(self.visits == 0);
+              return TurnedOutToBeImpossible
+            },
             1 => 0,
             _ => {
               let guard = self.tree.similar_moves.lock().unwrap();
               let similar_moves = &*guard;
               
-              let mut scored_moves = 0;
+              /*let mut scored_moves = 0;
               for choice in self.choices.iter() {
                 if choice.node_type.has_similarity_scores (choice, similar_moves) {
                   scored_moves += 1;
                 }
-              }
+              }*/
               
               /*
                 instead of just exploration versus exploitation, we actually have THREE choices here:
@@ -848,26 +857,41 @@ impl GenericNode {
               let (index, naive_best) = self.choices.iter().enumerate().max_by_key(|&(a,b)|OrderedFloat(b.naive_score)).unwrap();
               
               if !naive_best.node_type.has_similarity_scores (naive_best, similar_moves) {
+                assert!(self.visits == 0);
                 index
               }
               else {
-                if ((self.visits & 1) == 0) && self.choices.iter().any(|a| !a.node_type.has_similarity_scores (a, similar_moves)) {
-                  self.choices.iter().enumerate().filter(|&(a,b)| !b.node_type.has_similarity_scores (b, similar_moves)).max_by_key(|&(a,b)|OrderedFloat(b.naive_score)).unwrap().0
+                if ((self.visits & 1) == 0) && self.choices.iter().any(
+                  |choice| !choice.node_type.has_similarity_scores (choice, similar_moves)) {
+                  self.choices.iter().enumerate().filter(
+                    |&(_i,choice)| !choice.node_type.has_similarity_scores (choice, similar_moves))
+                    .max_by_key(|&(_i,choice)|OrderedFloat(choice.naive_score)).unwrap().0
                 }
                 else {
                   let c=2.0;
                   let c_log_visits = if self.visits < 4 {0.0} else {c*((self.visits+1) as f64).ln()};
                   self.choices.iter().enumerate().filter_map(|(index,choice)| {
+                    let choice_similar_moves = choice.node_type.get_some_similar_moves (choice, similar_moves);
+                    if choice.visits == 0 && choice_similar_moves.is_empty() {
+                      assert!(!choice.node_type.has_similarity_scores (choice, similar_moves));
+                      return None
+                    }
+                    
                     let exact_score = choice.total_score;
                     let exact_weight = choice.visits as f64 * distance_weight(0.0);
+                    if choice.visits != 0 {assert!((exact_score/exact_weight).abs() < 1.01);}
                     let mut total_weight = exact_weight;
                     let mut total_score = exact_score;
-                    for (similar_index, similar) in choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter() {
+                    
+                    for (similar_index, similar) in choice_similar_moves.into_iter() {
                       let weight = distance_weight (
                         (similar_index.reference_point.0 - choice.state_globals.similarity_index.reference_point.0).abs()
                         //similarity_distance(&similar.situation, &SimilarMoveSituation{state:self.state.clone()}, self.node_type.focal_point(&self))
                         
                       );
+                      assert!(weight > 0.0);
+                      assert!(similar.visits > 0.0);
+                      assert!((similar.total_score/similar.visits).abs() < 1.01);
                       total_score += similar.total_score * weight;
                       total_weight += similar.visits * weight;
                     };
@@ -876,7 +900,11 @@ impl GenericNode {
                     let uncertainty_bonus = (c_log_visits/
                       min(OrderedFloat(total_weight), OrderedFloat(exact_weight*2.0+10.0)).0
                     ).sqrt();
-                    let score = total_score / total_weight + uncertainty_bonus;
+                    assert!(total_weight != 0.0);
+                    let average_score = total_score / total_weight;
+                    assert!(average_score.abs() < 1.01);
+                    assert!(uncertainty_bonus >= 0.0);
+                    let score = average_score + uncertainty_bonus;
                   
                     Some((index, score))
                   }).max_by_key(|&(a,b)|OrderedFloat(b)).unwrap().0
@@ -891,7 +919,10 @@ impl GenericNode {
         PlayedOutWithScores(scores) => scores,
         TurnedOutToBeImpossible => {
           self.choices.remove(choice);
-          if self.choices.is_empty() { return TurnedOutToBeImpossible; }
+          if self.choices.is_empty() {
+            assert!(self.visits == 0);
+            return TurnedOutToBeImpossible;
+          }
           return self.step_into();
         },
       };

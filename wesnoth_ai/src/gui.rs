@@ -81,12 +81,15 @@ pub fn draw_state (interface: &mut conrod::UiCell, state: & fake_wesnoth::State,
   }
 }
 
+use monte_carlo_ai::{SimilarMoveIndex, SimilarMoveData, SimilarMoveSituation};
+
 #[derive (Clone)]
 struct DisplayedState {
   depth: usize,
   size: [f64; 2],
   state: Arc <fake_wesnoth::State>,
   lines: Vec<([i32;2],[i32;2])>,
+  similar_moves: Vec<(SimilarMoveIndex, SimilarMoveData)>,
   text: String,
   detail_text: String,
 }
@@ -131,6 +134,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   
   let mut states_display = Vec::new();
   let mut which_displayed = 0;
+  let mut which_similar_displayed = 0;
   let mut focused = 0;
   let depth_width = 30.0;
 
@@ -215,6 +219,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
             size: size,
             state: node.state().unwrap_or(root.state().unwrap()),
             lines: node.lines(),
+            similar_moves: node.get_some_similar_moves(),
             text: node.info_text(),
             detail_text: node.detail_text(),
           });
@@ -257,13 +262,21 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
               let depth = (x/depth_width) as usize;
               let mut height = 1.0-(y/HEIGHT as f64);
               
-              if let Some(focused) = states_display.get (focused) {
-                let focused_diff = focused.size [1] - focused.size [0];
-                height = focused.size [0] + focused_diff*height;
+              if (depth as f64) < (WIDTH/2) as f64 / depth_width {
+                if let Some(focused) = states_display.get (focused) {
+                  let focused_diff = focused.size [1] - focused.size [0];
+                  height = focused.size [0] + focused_diff*height;
+                }
+                which_displayed = states_display.iter()
+                  .position(|a|a.depth == depth && a.size[0] < height && a.size[1] > height).unwrap_or(focused);
               }
-              
-              which_displayed = states_display.iter()
-                .position(|a|a.depth == depth && a.size[0] < height && a.size[1] > height).unwrap_or(99999999);
+              else {
+                which_displayed = focused;
+                which_similar_displayed = match states_display.get(which_displayed) {
+                  Some(d) if d.similar_moves.len() > 0 => (d.similar_moves.len() as f64 * height) as usize,
+                  _ => 0,
+                };
+              }
               redraw = true;
             },
             glium::glutin::WindowEvent::MouseInput {state: glium::glutin::ElementState::Pressed, ..} => {
@@ -304,12 +317,36 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
           .wrap_by_word()
           .bottom_right_of(ui.window)
           .set(ui.widget_id_generator().next(), ui);
+        
+        let similar_height = HEIGHT as f64 / displayed_state.similar_moves.len() as f64;
+        for (count, & (ref index, ref data)) in displayed_state.similar_moves.iter().enumerate() {
+          let state = &data.situation.state;
+          let center = [
+            (WIDTH as f64)/2.0 - depth_width/2.0,
+            -(HEIGHT as f64)/2.0 + similar_height * (0.5 + count as f64)            
+          ];
+          if count == which_similar_displayed {
+            draw_state (ui, &state, [0.0,-200.0], &[]);
+            
+            widget::Rectangle::fill_with ([depth_width, similar_height], side_color (state.current_side))
+          }
+          else {
+            widget::Rectangle::outline_styled ([depth_width, similar_height], conrod::widget::primitive::line::Style::solid().color (side_color (state.current_side)))
+          }
+            .xy(center)
+            .set(ui.widget_id_generator().next(), ui);
+          widget::Text::new(&format!("{:.2}\n{:.2}\n{}", index.reference_point.0, data.total_score/data.visits as f64, data.visits))
+            .color(side_color (state.current_side))
+            .font_size(12)
+            .xy (center)
+            .set(ui.widget_id_generator().next(), ui);
+        }
       }
       if focused >= states_display.len() {focused = 0;}
       for (index, displayed_state) in states_display.iter().enumerate() {
         let focused = states_display.get (focused).unwrap();
         if displayed_state.size [0] > focused.size[1] || displayed_state.size [1] < focused.size[0] { continue; }
-        if depth_width*displayed_state.depth as f64 > WIDTH as f64 { continue; }
+        if depth_width*displayed_state.depth as f64 > (WIDTH/2) as f64 { continue; }
         let focused_diff = focused.size [1] - focused.size [0];
         let state = &displayed_state.state;
         
