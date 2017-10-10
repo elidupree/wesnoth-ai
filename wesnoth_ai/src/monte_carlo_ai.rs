@@ -1,12 +1,15 @@
 use rand::{self, random, Rng};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, BTreeMap};
+use std::collections::Bound::{Excluded, Unbounded};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::any::Any;
 use std::fmt::{self,Debug};
 use std::iter::once;
+
+use ordered_float::OrderedFloat;
 
 use fake_wesnoth;
 use naive_ai;
@@ -18,11 +21,10 @@ use fake_wesnoth::{State, Unit, Move};
 pub struct GenericNode {
   pub state: Arc<State>,
   pub state_globals: Arc<StateGlobals>,
-  pub turn: Arc<GenericTurnGlobals>,
   pub tree: Arc<TreeGlobals>,
   pub visits: i32,
-  pub total_score: OrderedFloat<f64>,
-  pub naive_score: OrderedFloat<f64>,
+  pub total_score: f64,
+  pub naive_score: f64,
   pub choices: Vec<GenericNode>,
   pub node_type: Box<GenericNodeType>,
 }
@@ -59,19 +61,19 @@ impl DisplayableNode for GenericNode {
 
 
 
-#[derive (Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive (Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct SimilarMoveIndex {
   reference_point: OrderedFloat <f64>,
   random_distinguisher: OrderedFloat <f64>
 }
 
-#[derive (Clone)]
+#[derive (Clone, Debug)]
 pub struct SimilarMoveData {
   score: f64,
   situation: SimilarMoveSituation,
 }
 
-#[derive (Clone)]
+#[derive (Clone, Debug)]
 pub struct SimilarMoveSituation {
   state: Arc <State>,
 }
@@ -82,40 +84,40 @@ fn hex_weight_for_similarity (state: &State, focal_point: Option<[i32; 2]>, loca
     None => {
       1.0/(state.map.width*state.map.height) as f64
     },
-    Some (focal_point) {
-      let distance = distance_between (focal_point, location);
+    Some (focal_point) => {
+      let distance = fake_wesnoth::distance_between (focal_point, location);
       //there are 6N tiles at distance N
       //so we want \sum_0^inf 6N*weight(N) to converge
       //how about weight(N) = 1/6N^3
       // then it converges to 1.645
       // also we need a special case for 0
       if distance == 0 {0.5}
-      else { distance.powi(3) / (2.0*6.0*1.645)}
+      else { (distance as f64).powi(3) / (2.0*6.0*1.645)}
     },
   }
 }
 fn similar_move_index (data: & SimilarMoveSituation, focal_point: Option<[i32; 2]>)->SimilarMoveIndex {
   let result = 0.0;
-  for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
-    let weight = hex_weight_for_similarity (&first.state, focal_point);
+  for y in 1..(data.state.map.height+1) { for x in 1..(data.state.map.width+1) {
+    let weight = hex_weight_for_similarity (&data.state, focal_point, [x,y]);
     weight * hex_similarity_score_1d (data, [x,y]);
   }}
   SimilarMoveIndex {
-    reference_point: OrderedFloat::new(result),
-    random_distinguisher: OrderedFloat::new(rand::thread_rng().gen()),
+    reference_point: OrderedFloat(result),
+    random_distinguisher: OrderedFloat(rand::thread_rng().gen()),
   }
 }
 fn similarity_distance (first: & SimilarMoveSituation, second: & SimilarMoveSituation, focal_point: Option<[i32; 2]>)->f64 {
   let result = 0.0;
-  for y in 1..(state.map.height+1) { for x in 1..(state.map.width+1) {
-    let weight = hex_weight_for_similarity (&first.state, focal_point);
-    weight * (hex_similarity_score_1d (first, [x,y]) - hex_similarity_score_1d (second, [x,y])).abs()
+  for y in 1..(first.state.map.height+1) { for x in 1..(first.state.map.width+1) {
+    let weight = hex_weight_for_similarity (&first.state, focal_point, [x,y]);
+    result += weight * (hex_similarity_score_1d (first, [x,y]) - hex_similarity_score_1d (second, [x,y])).abs();
   }}
   result
 }
 fn hex_similarity_score_1d (data: & SimilarMoveSituation, location: [i32;2])->f64 {
-  let location = state.geta (location);
-  if let unit = location.unit.as_ref() {
+  let location = data.state.geta (location);
+  if let Some(unit) = location.unit.as_ref() {
     unit.hitpoints as f64/unit.unit_type.max_hitpoints as f64
   }
   else {
@@ -123,37 +125,38 @@ fn hex_similarity_score_1d (data: & SimilarMoveSituation, location: [i32;2])->f6
   }
 }
 fn distance_weight (distance: f64) -> f64 {
-  0.5.powf(distance.abs()*100.0)
+  0.5f64.powf(distance.abs()*100.0)
 }
 
+#[derive (Clone, Debug, Default)]
 pub struct SimilarMoves {
   data: BTreeMap<SimilarMoveIndex, SimilarMoveData>,
 }
 
-fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: SimilarMoveIndex, count: usize) {
-  similar_moves.match {
+fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: SimilarMoveIndex, count: usize)->Vec<SimilarMoveData> {
+  match similar_moves {
     None => Vec::new(),
     Some(similar_moves) => {
       let mut result = Vec::new();
-      let mut earlier_iter = similar_moves.range ((Unbounded, Excluded(index))).rev();
-      let mut later_iter = similar_moves.range ((Excluded(index), Unbounded));
+      let mut earlier_iter = similar_moves.data.range ((Unbounded, Excluded(index))).rev();
+      let mut later_iter = similar_moves.data.range ((Excluded(index), Unbounded));
       let mut earlier_value = earlier_iter.next();
       let mut later_value = later_iter.next();
       loop {
         match (earlier_value, later_value) {
           (None, None) => break,
-          (Some(earlier), None) => {
+          (Some((_,earlier)), None) => {
             result.push (earlier.clone());
-            result.extend (earlier_iter.cloned().take(count - result.len()));
+            result.extend (earlier_iter.map(|(k,v)| v.clone()).take(count - result.len()));
             break
           },
-          (None, Some(later)) => {
+          (None, Some((_,later))) => {
             result.push (later.clone());
-            result.extend (later_iter.cloned().take(count - result.len()));
+            result.extend (later_iter.map(|(k,v)| v.clone()).take(count - result.len()));
             break
           },
-          (Some(earlier), Some(later)) => {
-            if index.reference_point - earlier_value.reference_point < later_value.reference_point - index.reference_point {
+          (Some((earlier_index, earlier)), Some((later_index, later))) => {
+            if index.reference_point.0 - earlier_index.reference_point.0 < later_index.reference_point.0 - index.reference_point.0 {
               result.push (earlier.clone());
               earlier_value = earlier_iter.next();
             }
@@ -170,7 +173,7 @@ fn get_some_similar_moves (similar_moves: Option <& SimilarMoves>, index: Simila
   }
 }
 
-#[derive (Serialize, Deserialize, Debug, Default)]
+#[derive (Clone, Debug, Default)]
 pub struct SimilarMovesDirectory {
   pub attacks: HashMap<Attack, SimilarMoves>,
   pub moves: HashMap<([i32;2], [i32;2]), SimilarMoves>,
@@ -180,7 +183,7 @@ pub struct SimilarMovesDirectory {
 }
 
 
-#[derive (Clone, Serialize, Deserialize, Debug)]
+#[derive (Debug)]
 pub struct TreeGlobals {
   similar_moves: Mutex <SimilarMovesDirectory>,
   pub starting_turn: i32,
@@ -188,7 +191,7 @@ pub struct TreeGlobals {
 }
 
 
-#[derive (Clone, Serialize, Deserialize, Debug)]
+#[derive (Clone, Debug)]
 pub struct StateGlobals {
   similarity_index: SimilarMoveIndex,
   pub reaches: HashMap<[i32;2], fake_wesnoth::Reach>
@@ -427,7 +430,7 @@ impl GenericNodeType for ExecuteAttack {
     directory.attacks.get(& self.attack).is_some()
   }
   fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
-    get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index, 30);
+    get_some_similar_moves (directory.attacks.get(& self.attack), node.state_globals.similarity_index, 30)
   }
   fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
     directory.attacks.entry (self.attack.clone()).or_insert (Default::default()).data.insert(node.state_globals.similarity_index, SimilarMoveData {
@@ -450,7 +453,7 @@ impl GenericNodeType for ExecuteRecruit {
     result.push (fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type});
     result
   }
-  fn rave_score (&self, node: &GenericNode) -> RaveScore {
+  /*fn rave_score (&self, node: &GenericNode) -> RaveScore {
     let by_type = node.turn.rave_scores.lock().unwrap().recruit_types.get(& self.recruit.unit_type).cloned().unwrap_or_default();
     let by_location = node.turn.rave_scores.lock().unwrap().recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]).cloned().unwrap_or_default();
     RaveScore {
@@ -470,7 +473,7 @@ impl GenericNodeType for ExecuteRecruit {
     rave_score.total_score += score;
     rave_score.visits += 1;
     }
-  }
+  }*/
 }
 impl GenericNodeType for FinishTurnLazily {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
@@ -624,10 +627,10 @@ use self::StepIntoResult::{PlayedOutWithScores, TurnedOutToBeImpossible};
 pub fn choose_moves (state: & State)->(GenericNode, Vec<Move>) {
   let mut root = GenericNode {
     state: Arc::new (state.clone()),
-    turn: Arc::default(),
     tree: Arc::new(TreeGlobals {
       starting_turn: state.turn,
       starting_side: state.current_side,
+      similar_moves: Default::default(),
     }),
     state_globals: Arc::new(StateGlobals::new (state)),
     visits: 0,
@@ -667,7 +670,7 @@ impl GenericNode {
   }
   fn new_child_dynamic (&self, node_type: Box<GenericNodeType>) -> GenericNode {
     GenericNode {
-      state: self.state.clone(), turn: self.turn.clone(), tree: self.tree.clone(), state_globals: self.state_globals.clone(),
+      state: self.state.clone(), tree: self.tree.clone(), state_globals: self.state_globals.clone(),
       visits: 0, total_score: 0.0,
       naive_score: 0.0,
       choices: Vec::new(),
@@ -756,7 +759,7 @@ impl GenericNode {
               
               let mut scored_moves = 0;
               for choice in self.choices.iter() {
-                if choice.has_similar_moves (self, similar_moves) {
+                if choice.node_type.has_similarity_scores (choice, similar_moves) {
                   scored_moves += 1;
                 }
               }
@@ -781,34 +784,35 @@ impl GenericNode {
                 Since I haven't come up with a coherent argument for how to prioritize, I'm just going to alternate.
               */
               
-              let (index, naive_best) = self.choices.iter().enumerate().max_by_key(|(a,b)|b.naive_score).unwrap();
+              let (index, naive_best) = self.choices.iter().enumerate().max_by_key(|&(a,b)|OrderedFloat(b.naive_score)).unwrap();
               
-              if !naive_best.node_type.has_similar_moves (naive_best, similar_moves) {
+              if !naive_best.node_type.has_similarity_scores (naive_best, similar_moves) {
                 index
               }
-              else 
-                if ((self.visits & 1) == 0) && self.choices.iter().any(|a| !a.node_type.has_similar_moves (a, similar_moves)) {
-                  self.choices.iter().enumerate().filter(|(a,b)| !b.node_type.has_similar_moves (b, similar_moves)).max_by_key(|(a,b)|b.naive_score).unwrap().0
+              else {
+                if ((self.visits & 1) == 0) && self.choices.iter().any(|a| !a.node_type.has_similarity_scores (a, similar_moves)) {
+                  self.choices.iter().enumerate().filter(|&(a,b)| !b.node_type.has_similarity_scores (b, similar_moves)).max_by_key(|&(a,b)|OrderedFloat(b.naive_score)).unwrap().0
                 }
                 else {
-                  let c_log_visits = c*((visits+1) as f64).ln();
+                  let c=0.2;
+                  let c_log_visits = c*((self.visits+1) as f64).ln();
                   self.choices.iter().enumerate().filter_map(|(index,choice)| {
                     let exact_score = choice.total_score;
-                    let exact_weight = choice.visits * distance_weight(0.0);
+                    let exact_weight = choice.visits as f64 * distance_weight(0.0);
                     let mut total_weight = exact_weight;
                     let mut total_score = exact_score;
                     let similar_moves = choice.node_type.get_some_similar_moves (choice, similar_moves).into_iter().map(|similar| {
                       let weight = distance_weight (similarity_distance(similar, &self.state));
                       total_score += similar.score * weight;
                       total_weight += weight;
-                    })
+                    });
                     
                     // in a previous version of this algorithm, I chose to limit the certainty granted by non-exact moves, so that it couldn't indefinitely postpone getting more exact scores. With the new system, we only examine a fixed maximum amount of similar moves anyway, so there's no theoretical need for an additional limit.
                     let uncertainty_bonus = (c_log_visits/total_weight).sqrt();
                     let score = total_score / total_weight + uncertainty_bonus;
                   
                     Some((index, score))
-                  }).max_by_key(|(a,b)|b).unwrap().0
+                  }).max_by_key(|&(a,b)|OrderedFloat(b)).unwrap().0
                 }
               }
             },
@@ -833,7 +837,7 @@ impl GenericNode {
     
     {
       let guard = self.tree.similar_moves.lock().unwrap();
-      let similar_moves = &*guard;
+      let similar_moves = &mut*guard;
       self.node_type.add_similarity_score(self, similar_moves, scores[self.state.current_side]);
     }
     

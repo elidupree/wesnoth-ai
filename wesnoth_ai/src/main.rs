@@ -13,6 +13,7 @@ extern crate smallvec;
 extern crate arrayvec;
 extern crate slicevec;
 extern crate typed_arena;
+extern crate ordered_float;
 
 
 macro_rules! printerr(

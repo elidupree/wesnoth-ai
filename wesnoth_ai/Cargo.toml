@@ -25,5 +25,9 @@ features = ["rc"]
 version = "0.4"
 features = ["serde"]
 
+[dependencies.ordered-float]
+version = "0.2"
+features = ["serde"]
+
 [profile.dev]
 opt-level = 3
