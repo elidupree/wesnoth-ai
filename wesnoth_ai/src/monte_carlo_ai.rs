@@ -182,7 +182,7 @@ pub struct SimilarMovesDirectory {
   pub moves: HashMap<([i32;2], [i32;2]), SimilarMoves>,
   pub recruit_types: HashMap <usize, SimilarMoves>,
   pub recruit_locations: HashMap <[i32; 2], SimilarMoves>,
-  pub finish_turns: HashMap <i32, SimilarMoves>,
+  pub finish_turns: HashMap <(i32,usize), SimilarMoves>,
 }
 
 
@@ -448,27 +448,25 @@ impl GenericNodeType for ExecuteRecruit {
     result.push (fake_wesnoth::Move::Recruit{dst_x,dst_y,unit_type});
     result
   }
-  /*fn rave_score (&self, node: &GenericNode) -> RaveScore {
-    let by_type = node.turn.rave_scores.lock().unwrap().recruit_types.get(& self.recruit.unit_type).cloned().unwrap_or_default();
-    let by_location = node.turn.rave_scores.lock().unwrap().recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]).cloned().unwrap_or_default();
-    RaveScore {
-      total_score: by_type.total_score + by_location.total_score,
-      visits: by_type.visits + by_location.visits,
-    }
+  fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
+    directory.recruit_types.get(& self.recruit.unit_type).is_some() || directory.recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]).is_some()
   }
-  fn add_rave_score (&self, node: &GenericNode, score: f64) {
-    let mut guard = node.turn.rave_scores.lock().unwrap();
-    {
-    let rave_score = guard.recruit_types.entry (self.recruit.unit_type.clone()).or_insert (RaveScore::default());
-    rave_score.total_score += score;
-    rave_score.visits += 1;
-    }
-    {
-    let rave_score = guard.recruit_locations.entry ([self.recruit.dst_x, self.recruit.dst_y]).or_insert (RaveScore::default());
-    rave_score.total_score += score;
-    rave_score.visits += 1;
-    }
-  }*/
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+    let mut result = Vec::new();
+    result.extend(get_some_similar_moves (directory.recruit_types.get(& self.recruit.unit_type), node.state_globals.similarity_index.clone(), 15).into_iter());
+    result.extend(get_some_similar_moves (directory.recruit_locations.get(& [self.recruit.dst_x, self.recruit.dst_y]), node.state_globals.similarity_index.clone(), 15).into_iter());
+    result
+  }
+  fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
+    directory.recruit_types.entry (self.recruit.unit_type).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
+      score,
+      situation: SimilarMoveSituation {state: node.state.clone()},
+    });
+    directory.recruit_locations.entry ([self.recruit.dst_x, self.recruit.dst_y]).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
+      score,
+      situation: SimilarMoveSituation {state: node.state.clone()},
+    });
+  }
 }
 impl GenericNodeType for FinishTurnLazily {
   fn initialize_choices (&self, node: &GenericNode) -> (Vec<GenericNode>, Option <Box <GenericNodeType>>) {
@@ -522,6 +520,18 @@ impl GenericNodeType for FinishTurnLazily {
   }
   fn export_moves (&self, _node: &GenericNode) -> Vec<fake_wesnoth::Move> {
     self.0.clone()
+  }
+  fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
+    directory.finish_turns.get(& (node.state.turn, node.state.current_side)).is_some()
+  }
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+    get_some_similar_moves (directory.finish_turns.get(& (node.state.turn, node.state.current_side)), node.state_globals.similarity_index.clone(), 30)
+  }
+  fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
+    directory.finish_turns.entry ((node.state.turn, node.state.current_side)).or_insert (Default::default()).data.insert(node.state_globals.similarity_index.clone(), SimilarMoveData {
+      score,
+      situation: SimilarMoveSituation {state: node.state.clone()},
+    });
   }
 }
 impl GenericNodeType for ChooseHowToClearSpace {
@@ -609,6 +619,15 @@ impl GenericNodeType for ChooseHowToClearSpace {
     new_child.do_moves_on_state(wesnoth_moves.into_iter());
     result.push (new_child);
     (result, None)
+  }  
+  fn has_similarity_scores (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> bool {
+    (*self.follow_up)(self.finalize()).has_similarity_scores(node, directory)
+  }
+  fn get_some_similar_moves (&self, node: &GenericNode, directory: &SimilarMovesDirectory) -> Vec<SimilarMoveData> {
+    (*self.follow_up)(self.finalize()).get_some_similar_moves(node, directory)
+  }
+  fn add_similarity_score (&self, node: &GenericNode, directory: &mut SimilarMovesDirectory, score: f64) {
+    (*self.follow_up)(self.finalize()).add_similarity_score(node, directory, score)
   }
 }
 
