@@ -855,7 +855,7 @@ impl GenericNode {
                   self.choices.iter().enumerate().filter(|&(a,b)| !b.node_type.has_similarity_scores (b, similar_moves)).max_by_key(|&(a,b)|OrderedFloat(b.naive_score)).unwrap().0
                 }
                 else {
-                  let c=0.2;
+                  let c=2.0;
                   let c_log_visits = c*((self.visits+1) as f64).ln();
                   self.choices.iter().enumerate().filter_map(|(index,choice)| {
                     let exact_score = choice.total_score;
