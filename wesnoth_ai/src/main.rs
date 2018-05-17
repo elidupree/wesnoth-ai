@@ -696,7 +696,7 @@ fn send_to_lua <T: Serialize + Debug> (path: &Path, value: T) {
   let message = Message {index: new_serial_number(), data: value};
   println!("Sending: {:?}", message);
   let ready_path = path.join ("ready");
-  ::std::fs::remove_file(&ready_path).unwrap();
+  let _ = ::std::fs::remove_file(&ready_path);
   {
     let mut file = File::create (path.join("message.json")).unwrap();
     serde_json::to_writer (&mut file, &message).unwrap();

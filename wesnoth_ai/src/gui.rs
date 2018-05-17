@@ -101,7 +101,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   const WIDTH: u32 = 1200;
   const HEIGHT: u32 = 1000;
 
-  let mut events_loop = glium::glutin::EventsLoop::new();
+  /*let mut events_loop = glium::glutin::EventsLoop::new();
   let window = glium::glutin::WindowBuilder::new()
     .with_title("wesnoth-ai")
     .with_dimensions(WIDTH, HEIGHT);
@@ -123,7 +123,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
 
   let mut renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
   let image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
-  let mut events = Vec::new();
+  let mut events = Vec::new();*/
   
   let mut current_state: Option <Arc<fake_wesnoth::State>> = None;
   let mut redraw = true;
@@ -132,7 +132,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
   let mut proceeding = true;
   let mut replacing_tree = true;
   
-  let mut states_display = Vec::new();
+  //let mut states_display = Vec::new();
   let mut which_displayed = 0;
   let mut which_similar_displayed = 0;
   let mut focused = 0;
@@ -190,7 +190,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
         send_to_lua (&path, response);
       }
     }
-    if replacing_tree { if let Ok(root) = tree_receiver.try_recv() {
+    /*if replacing_tree { if let Ok(root) = tree_receiver.try_recv() {
       //let layers = Vec::new();
       states_display.clear();
       let mut frontier = vec![(&root as &DisplayableNode, [0.0, 1.0])];
@@ -379,7 +379,7 @@ pub fn main_loop(path: &Path, receiver: Receiver <fake_wesnoth::State>) {
       target.clear_color(0.0, 0.0, 0.0, 1.0);
       renderer.draw(&display, &mut target, &image_map).unwrap();
       target.finish().unwrap();
-    }
+    }*/
     
     thread::sleep (Duration::from_millis(10));
   }

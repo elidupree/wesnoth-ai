@@ -774,7 +774,7 @@ impl GenericNode {
     
     */
   
-    printlnerr!("{:?}", self.node_type);
+    //printlnerr!("{:?}", self.node_type);
     let scores = if let Some(scores) = self.state.scores.clone() {
       scores
     }
